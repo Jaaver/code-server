@@ -3,8 +3,12 @@
 #  A sub-1B-parameter reasoning engine with verifier-guided test-time search,
 #  a growing executable skill library, an auto-curriculum, and STaR/LoRA self-evolution.
 #
-#  Run: paste this whole file into one Google Colab cell and execute.
-#  Runtime > Change runtime type > T4 GPU (works on CPU too, degraded).
+#  Run: paste this whole file into one cell and execute.
+#    Colab   - Runtime > Change runtime type > T4 GPU
+#    Kaggle  - Settings > Accelerator: GPU, Internet: On, then "Save & Run All (Commit)",
+#              which runs it in the background so you can close everything
+#    Modal   - see modal_app.py alongside this file: `modal run --detach modal_app.py`
+#  Works on CPU too, degraded. State survives a disconnect; re-running resumes.
 #
 #  WHAT THIS IS (read the honest framing at the bottom of the report):
 #    - It is NOT a general superintelligence. No <1B model is, and no training run
@@ -36,16 +40,21 @@ PRESET = os.environ.get("PRISM_PRESET", "tiny")      # tiny | quick | standard |
 def _pick_state_dir():
     if os.environ.get("PRISM_STATE"):
         return os.environ["PRISM_STATE"]
-    if os.environ.get("PRISM_DRIVE", "1") not in ("0", "off", "false"):
+    if os.path.isdir("/kaggle/working"):
+        return "/kaggle/working/prism_state"   # Kaggle keeps this as notebook output
+    import importlib.util
+    in_colab = os.path.isdir("/content") and importlib.util.find_spec("google.colab") is not None
+    if in_colab and os.environ.get("PRISM_DRIVE", "1") not in ("0", "off", "false"):
         try:
-            from google.colab import drive           # only exists inside Colab
+            from google.colab import drive
             if not os.path.isdir("/content/drive/MyDrive"):
                 drive.mount("/content/drive")
             if os.path.isdir("/content/drive/MyDrive"):
                 return "/content/drive/MyDrive/prism_state"
         except Exception as e:
-            print(f"[PRISM] Drive not mounted ({type(e).__name__}); "
-                  f"state will be lost if the runtime dies. Set PRISM_DRIVE=0 to silence.")
+            # only alarming where it is true: /content really does die with the runtime
+            print(f"[PRISM] Drive not mounted ({type(e).__name__}); state is in /content and "
+                  f"will be lost if the runtime dies. PRISM_DRIVE=0 silences this.")
     return "/content/prism_state" if os.path.isdir("/content") else os.path.join(os.getcwd(), "prism_state")
 
 STATE_DIR = _pick_state_dir()

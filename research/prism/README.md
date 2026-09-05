@@ -10,6 +10,19 @@ Runtime > Change runtime type > T4 GPU     (CPU works too, much slower)
 paste the whole file into one cell, run it
 ```
 
+### Where to run it if you want to close everything
+
+Colab keeps a runtime alive only while the tab is open and the machine is awake, unless you
+have Pro+ background execution. Three alternatives that genuinely run detached:
+
+| | cost | how |
+|---|---|---|
+| **Kaggle Notebooks** | free, roughly 30 GPU-hours/week | paste the script in, Accelerator: GPU, Internet: **On**, then **Save & Run All (Commit)**. That queues it server-side — close the browser, the output is waiting when you come back. `/kaggle/working` is detected automatically and persists as notebook output. |
+| **Modal** | usage-based, has a free monthly credit allowance | `modal run --detach modal_app.py` — returns immediately, job keeps running. State goes in a Modal Volume so re-runs resume. Watch with `modal app logs prism`. |
+| **RunPod / Vast.ai / Lambda** | hourly, cheapest per GPU-hour | rent a box, `tmux new -s prism`, run `python prism_colab.py`, detach with `Ctrl-B D`, close everything. Remember to stop the box — it bills while it exists. |
+
+Quotas and pricing on all of these move; check current terms rather than trusting this table.
+
 **A disconnect costs you nothing.** Colab kills a runtime when the tab closes or the machine
 sleeps, and `/content` dies with it — so state goes to Google Drive (one mount click on the
 first run) and every phase checkpoints as it finishes. If the runtime drops, re-run the same

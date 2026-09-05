@@ -164,6 +164,35 @@ able to flatter this system.
 
 The run asserts `n_params < 1e9` and aborts if the constraint is violated.
 
+## Result of the first full run (Kaggle T4, 8 hours, 70 rounds)
+
+`results/kaggle-t4-run1-report.json` is the real thing, on a real T4, with LoRA working.
+It is a negative result and it is kept here on purpose.
+
+```
+system                                 math   grid    sci  agent    MEAN
+base 494M, 1 pass, no tools            40.0    0.0    0.0    0.0    10.0
+base + self-consistency, no tools      50.0    0.0    0.0    0.0    12.5
+PRISM v0 (search+verify)               30.0    0.0    0.0    0.0     7.5
+```
+
+* **The scaffold lost.** On the only suite that scored at all, PRISM came in below both
+  controls. On a 10-item suite those are 3, 4 and 5 problems — the difference is noise, but
+  there is certainly no evidence of the gain the design predicts.
+* **grid, sci and agent scored 0.0 in all 71 evaluations.** Across 8 hours of self-generated
+  curriculum the model solved 0/280 planning tasks, 23/350 grid, 28/350 laws, 84/350 math.
+* **Self-evolution ran backwards.** Math averaged 42.0 over the first 35 rounds and 26.1 over
+  the last 35. The cause is visible in the logs: LoRA training loss hit 0.000 on the second
+  update and stayed under 0.01 for 59 of 67 updates. The adapter memorised its 133 verified
+  traces and was then retrained on them 67 more times.
+
+Three fixes went in because of this run: each round now resets the adapter and retrains from
+scratch on the accumulated traces (which is what STaR actually specifies); training stops when
+the loss collapses; and a round that scores materially below the best reverts to the
+best-known weights, so an unattended loop cannot walk downhill for eight hours. The run also
+exposed that `tiny` prints a results table nobody should read as a measurement, so the report
+now says so itself.
+
 ## Measured limits
 
 Testing against real sub-1B weights (Qwen2.5-0.5B-Instruct, Qwen2.5-Coder-0.5B-Instruct and

@@ -92,6 +92,7 @@ else:
     TIME_BUDGET = float(os.environ.get("PRISM_TIME_BUDGET", CFG["time_budget"]))
 EVAL_EVERY = int(os.environ.get("PRISM_EVAL_EVERY", CFG.get("eval_every", 1)))
 RESERVE_S = 240.0        # kept back so the final report always gets written
+REGRESS_TOL = float(os.environ.get("PRISM_REGRESS_TOL", "10"))  # revert a round worse than this
 FIRST_ROUND_S = 30.0     # optimistic estimate for round 1, before anything has been timed
 
 # A SIGTERM from Kaggle at the session limit, or your Ctrl-C, must not throw away the
@@ -470,6 +471,34 @@ class LLM:
             log("  worked around the peft/torchao version mismatch (torchao is unused here)")
         except Exception:
             pass
+
+    def reset_lora(self):
+        """Re-initialise the adapter to its starting point.
+
+        STaR retrains from the BASE model on all accumulated data each iteration. Continuing
+        to train an adapter that already fits its trace set perfectly does not add knowledge,
+        it just deepens memorisation - measured on an 8-hour run: training loss 0.000 by the
+        second update and every update after it."""
+        n = 0
+        for mod in self.model.modules():
+            names = list(getattr(mod, "lora_A", {}) or {})
+            for nm in names:
+                try:
+                    mod.reset_lora_parameters(nm, True); n += 1
+                except Exception:
+                    pass
+        return n
+
+    def snapshot_lora(self):
+        return {k: v.detach().clone() for k, v in self.model.named_parameters() if v.requires_grad}
+
+    def restore_lora(self, snap):
+        if not snap: return False
+        with torch.no_grad():
+            for k, v in self.model.named_parameters():
+                if k in snap and v.shape == snap[k].shape:
+                    v.copy_(snap[k])
+        return True
 
     def attach_lora(self, r=16, alpha=32, resume_from=None):
         self._neutralise_torchao()
@@ -1546,6 +1575,11 @@ def star_finetune(llm, pairs, steps, lr=1.2e-4, bs=2, maxlen=896):
         losses.append(float(loss.detach()))
         if (step + 1) % 20 == 0:
             log("  sft step %3d/%d  loss=%.4f", step + 1, steps, sum(losses[-20:]) / len(losses[-20:]))
+        # Nothing left to learn from these traces; further steps only memorise them harder.
+        if len(losses) >= 12 and sum(losses[-8:]) / 8 < 0.02:
+            log("  sft loss collapsed to %.4f at step %d — stopping before it memorises",
+                sum(losses[-8:]) / 8, step + 1)
+            break
     llm.model.eval()
     try: llm.model.config.use_cache = prev_cache
     except Exception: pass
@@ -1781,6 +1815,7 @@ def main():
     stop_reason = "finished the planned rounds"
     round_times = []
     best_mean = max((c["MEAN"] for c in curve), default=0.0)
+    best_snap = None
     stale = 0
     rd = done_rounds
     while True:
@@ -1820,6 +1855,7 @@ def main():
             log("  curriculum: agent tasks now start at tier %d", frontier["agent"])
         all_pairs.extend(pairs)
         if can_train:
+            llm.reset_lora()          # STaR: fresh adapter, all accumulated traces
             tr = star_finetune(llm, all_pairs, steps=CFG["sft_steps"])
             if tr: log("  STaR update on %d traces: loss %.3f -> %.3f",
                        tr["n_pairs"], tr["loss_start"], tr["loss_end"])
@@ -1836,8 +1872,16 @@ def main():
             CK[f"prism_v{rd}"] = acc
             if acc["MEAN"] > best_mean + 0.5:
                 best_mean, stale = acc["MEAN"], 0
+                if can_train: best_snap = llm.snapshot_lora()
             else:
                 stale += 1
+                # An unattended loop must not walk downhill for hours. Measured on the first
+                # 8-hour run: math averaged 42.0 over the first half and 26.1 over the second.
+                # REGRESS_TOL is deliberately loose because a small suite is very noisy.
+                if can_train and best_snap and acc["MEAN"] < best_mean - REGRESS_TOL:
+                    llm.restore_lora(best_snap)
+                    log("  round %d scored %.1f against a best of %.1f — reverted the adapter "
+                        "to the best-known weights", rd, acc["MEAN"], best_mean)
                 if stale == 3:
                     log("  no gain over the last 3 evaluations (best %.1f) — the loop has "
                         "saturated on what it can verify; still running, but say so honestly",
@@ -1889,6 +1933,14 @@ def main():
         row(f"PRISM v{c['round']} (self-evolved)", c)
     if fr: row(f"FRONTIER {fr['model']} (1 pass)", fr)
     print("-" * len(hdr))
+    small = {d: len(EVAL[d]) for d in ("math", "grid", "sci", "agent") if len(EVAL[d]) < 30}
+    if small:
+        print("\n!! RESOLUTION WARNING — these numbers are not measurements.")
+        for d, n_ in sorted(small.items()):
+            print(f"     {d}: {n_} items, so one task is worth {100.0/n_:.0f} points and the "
+                  f"smallest difference this suite can express is {100.0/n_:.0f}")
+        print("     Differences smaller than that are sampling noise, not evidence. Run "
+              "PRISM_PRESET=standard or full before drawing any conclusion from the table.")
     print(f"\nparameters: {llm.n_params:,} ({llm.n_params/1e9:.4f}B)  — constraint <1B: "
           f"{'SATISFIED' if llm.n_params < 1e9 else 'VIOLATED'}")
     print(f"compression vs a 1T model: {1e12/llm.n_params:,.0f}x fewer parameters")

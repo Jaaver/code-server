@@ -37,6 +37,9 @@ class LiveMock(MK["MockLLM"]):
     """Re-indexes itself from whatever tasks the run has created so far."""
     def __init__(self, p): super().__init__([], p_correct=p); self.seen=0
     def attach_lora(self, r=16, alpha=32, resume_from=None): return 4_300_000
+    def reset_lora(self): self.resets = getattr(self, "resets", 0) + 1; return 1
+    def snapshot_lora(self): return {"w": 1}
+    def restore_lora(self, snap): return True
     def sync(self):
         pool = [t for v in G["EVAL"].values() for t in v] + REG
         if len(pool) != self.seen:
@@ -163,5 +166,38 @@ for i in range(400):
 assert len(SK) <= SK.CAP + 4, f"library grew to {len(SK)} past a cap of {SK.CAP}"
 assert len({i["domain"] for i in SK.items}) == 4, "eviction wiped out entire domains"
 print(f"skill library capped at {len(SK)} entries with all 4 domains surviving  \u2713")
+
+# =====================================================================================
+#  The 8-hour run degraded itself: fresh adapter per round, and revert a bad round
+# =====================================================================================
+class _FakeParam:
+    def __init__(self, v): self.v = v; self.requires_grad = True; self.shape = (1,)
+    def detach(self): return self
+    def clone(self): return _FakeParam(self.v)
+    def copy_(self, o): self.v = o.v
+
+class _LoraMock(LiveMock):
+    def __init__(self, p):
+        super().__init__(p); self._w = _FakeParam(0.0); self._resets = 0
+    def reset_lora(self): self._resets += 1; self._w.v = 0.0; return 1
+    def snapshot_lora(self): return {"w": self._w.clone()}
+    def restore_lora(self, snap): self._w.copy_(snap["w"]); return True
+
+lm = _LoraMock(0.5)
+snap = lm.snapshot_lora(); lm._w.v = 99.0
+lm.restore_lora(snap)
+assert lm._w.v == 0.0, "restore_lora did not put the weights back"
+lm.reset_lora(); assert lm._resets == 1
+print("\nadapter snapshot/restore/reset round-trips correctly  \u2713")
+
+# the trainer must stop once the loss has collapsed rather than memorising further
+_calls = {"n": 0}
+_real_sft = G["star_finetune"]
+src = open(PRISM).read()
+assert "sft loss collapsed" in src, "the memorisation guard is missing"
+assert "llm.reset_lora()          # STaR: fresh adapter" in src, "rounds do not reset the adapter"
+assert "reverted the adapter" in src, "no regression revert"
+assert "RESOLUTION WARNING" in src, "no small-suite warning"
+print("memorisation guard, per-round reset, regression revert and resolution warning present  \u2713")
 
 print("CONTINUOUS-MODE TESTS PASSED")

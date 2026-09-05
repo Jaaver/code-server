@@ -20,6 +20,12 @@ from collections import Counter, defaultdict
 
 T0 = time.time()
 
+# keep the cell's output readable — a long run is meant to be skimmed, not scrolled
+os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
+os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+os.environ.setdefault("DATASETS_VERBOSITY", "error")
+
 # ------------------------------------------------------------------ configuration ---
 PRESET = os.environ.get("PRISM_PRESET", "quick")     # quick | standard | full
 STATE_DIR = os.environ.get("PRISM_STATE") or (
@@ -82,7 +88,16 @@ try:
     import peft
 except Exception:
     _pip("-U", "peft"); import peft
+try:
+    import datasets                      # only used for the real GSM8K split
+except Exception:
+    _pip("datasets")
 from transformers import AutoTokenizer, AutoModelForCausalLM
+try:
+    import warnings; warnings.filterwarnings("ignore")
+    transformers.logging.set_verbosity_error()
+except Exception:
+    pass
 
 np.random.seed(SEED)
 torch.manual_seed(SEED)

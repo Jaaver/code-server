@@ -872,22 +872,52 @@ def _agent_desc(t):
              sum(c.isdigit() for c in flat), sum(c in KEYS for c in flat),
              sum(c in DOORS for c in flat)))
 
-def sci_score_expr(expr, t):
-    """Normalised MSE of a candidate closed form on the full data. Lower is better."""
-    if not expr or len(expr) > 400: return (1e18, "empty")
+def sci_score_expr(expr, t, fit=False):
+    """Normalised MSE of a candidate closed form. Returns (score, effective_expr, error).
+
+    With fit=True the sandbox also least-squares fits a scale and offset around the
+    candidate, so the model only has to propose the functional FORM and the optimiser
+    supplies the constants -- the standard skeleton+optimiser split in symbolic regression,
+    and the thing that lets a 0.6B proposer be useful here. The single-pass baseline is
+    scored with fit=False so this tool is not silently credited to the raw model."""
+    if not expr or len(expr) > 400: return (1e18, expr, "empty")
     payload = json.dumps(t["rows"])
     src = ("import math, json\nrows=json.loads('''" + payload + "''')\n"
            "def f(" + ",".join(f"x{j}" for j in range(t["nvars"])) + "):\n    return (" + expr + ")\n"
-           "num=0.0; den=0.0; mu=sum(r[-1] for r in rows)/len(rows)\n"
+           "ps=[]\n"
            "for r in rows:\n"
-           "    try:\n        p=f(*r[:-1])\n    except Exception:\n        print(1e18); raise SystemExit\n"
-           "    if p is None or p!=p or abs(p)>1e15:\n        print(1e18); raise SystemExit\n"
-           "    num+=(p-r[-1])**2; den+=(r[-1]-mu)**2\n"
-           "print(num/max(den,1e-12))\n")
+           "    try:\n        p=float(f(*r[:-1]))\n    except Exception:\n"
+           "        print(json.dumps({'raw':1e18})); raise SystemExit\n"
+           "    if p!=p or abs(p)>1e15:\n        print(json.dumps({'raw':1e18})); raise SystemExit\n"
+           "    ps.append(p)\n"
+           "ys=[r[-1] for r in rows]; n=len(ys)\n"
+           "mu=sum(ys)/n; den=max(sum((y-mu)**2 for y in ys), 1e-12)\n"
+           "raw=sum((p-y)**2 for p,y in zip(ps,ys))/den\n"
+           "out={'raw':raw}\n"
+           "if " + ("True" if fit else "False") + ":\n"
+           "    mp=sum(ps)/n\n"
+           "    sxx=sum((p-mp)**2 for p in ps); sxy=sum((p-mp)*(y-mu) for p,y in zip(ps,ys))\n"
+           "    if sxx>1e-12:\n"
+           "        a=sxy/sxx; bb=mu-a*mp\n"
+           "        fit=sum((a*p+bb-y)**2 for p,y in zip(ps,ys))/den\n"
+           "        out.update(fit=fit, a=a, b=bb, mu=mu)\n"
+           "print(json.dumps(out))\n")
     r = run_python(src, timeout=8)
-    if not r["ok"]: return (1e18, (r["err"].splitlines() or ["error"])[-1][:160])
-    v = last_number(r["out"])
-    return (v if v is not None else 1e18, None)
+    if not r["ok"]: return (1e18, expr, (r["err"].splitlines() or ["error"])[-1][:160])
+    try:
+        d = json.loads((r["out"].splitlines() or ["{}"])[-1])
+    except Exception:
+        return (1e18, expr, "unparsable score")
+    raw = float(d.get("raw", 1e18))
+    if "fit" in d and float(d["fit"]) < raw:
+        a, bb = float(d["a"]), float(d["b"])
+        scale = max(1.0, abs(float(d.get("mu", 1.0))))      # fitted constants carry FP noise
+        a = round(a, 10); bb = 0.0 if abs(bb) < 1e-9 * scale else round(bb, 10)
+        if abs(a - 1) < 1e-9 and bb == 0.0:
+            return (raw, expr, None)
+        e2 = (f"{a}*({expr})" if abs(a - 1) > 1e-9 else expr) + (f" + {bb}" if bb else "")
+        return (float(d["fit"]), e2, None)
+    return (raw, expr, None)
 
 def prism_sci(llm, tasks, k=8, rounds=3):
     """LLM as a mutation operator inside an evolutionary loop scored by exact numeric fit."""
@@ -918,8 +948,8 @@ def prism_sci(llm, tasks, k=8, rounds=3):
                 if not m: continue
                 expr = m.group(1).strip().rstrip(";")
                 if "x0" not in expr and t["nvars"] >= 1: continue
-                s, _ = sci_score_expr(expr, t)
-                if s < 1e17: pops[i].append((s, expr))
+                s, eff, _ = sci_score_expr(expr, t, fit=True)
+                if s < 1e17: pops[i].append((s, eff))
             seen = set(); ded = []
             for s, e in sorted(pops[i]):
                 if e in seen: continue

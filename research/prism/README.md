@@ -44,7 +44,7 @@ FRONTIER <model> (1 pass)         <- optional, identical protocol
 |---|---|---|
 | `math` | GSM8K test split, or a procedural multi-step word-problem generator when offline | exact numeric match |
 | `grid` | ARC-lite induction: infer a grid transformation from 3 examples, emit `transform(g)` | must reproduce all examples, then exact-match a held-out grid |
-| `sci`  | recover a closed-form physical law from raw measurements | normalised MSE over 140 held-out rows; `<1e-8` counts as exact symbolic recovery |
+| `sci`  | recover a closed-form physical law from raw measurements | normalised MSE over 140 rows; `<1e-8` counts as exact symbolic recovery. PRISM may propose the *skeleton* and have a scale and offset least-squares fitted for it (the standard split in symbolic regression, and what makes a 0.6B proposer useful); the single-pass controls are scored without that fit, so the tool is never credited to the raw model |
 | `agent`| goal-directed planning in a grid world with ordered items, keys and doors, 4 difficulty tiers | the returned action string is simulated step by step |
 
 Each generator is validated against a reference oracle, and each verifier is validated against

@@ -84,12 +84,30 @@ print("grid verifier rejects a wrong rule with feedback:", err[:70])
 st = g["gen_sci"](12, rng)
 print(f"sci tasks: {len(st)}")
 for t in st:
-    expr = t["expr"]
-    s, e = g["sci_score_expr"](expr, t)
+    s, eff, e = g["sci_score_expr"](t["expr"], t)
     assert s < 1e-12, (t["name"], s, e)
-    s2, _ = g["sci_score_expr"]("x0+x1" if t["nvars"] >= 2 else "x0*2", t)
+    s2, _, _ = g["sci_score_expr"]("x0+x1" if t["nvars"] >= 2 else "x0*2", t)
     if s2 < 1e-8: fails.append(f"sci decoy accepted for {t['name']}")
 print("sci verifier: every ground-truth law scores nmse<1e-12, decoys rejected")
+
+# skeleton + optimiser: the right FORM with the wrong constant must be recoverable with
+# fit=True and must still be rejected with fit=False (the baseline's scoring mode).
+ke = [t for t in st if t["expr"] == "0.5*x0*x1**2"]
+if not ke:
+    saved = g["SCI_LAWS"][:]
+    g["SCI_LAWS"][:] = [l for l in saved if l[2] == "0.5*x0*x1**2"]
+    ke = g["gen_sci"](1, rng); g["SCI_LAWS"][:] = saved
+t = ke[0]
+s_nofit, _, _ = g["sci_score_expr"]("x0*x1**2", t, fit=False)
+s_fit, eff, _ = g["sci_score_expr"]("x0*x1**2", t, fit=True)
+assert s_nofit > 1e-3, f"unfitted wrong-constant form should not score well: {s_nofit}"
+assert s_fit < 1e-12, f"fitting should recover the constant: {s_fit}"
+assert "0.5" in eff, eff
+print(f"skeleton+optimiser: 'x0*x1**2' scores {s_nofit:.3f} raw, {s_fit:.1e} fitted -> {eff}")
+# and fitting must not rescue a genuinely wrong form
+s_bad, _, _ = g["sci_score_expr"]("x0+x1", t, fit=True)
+assert s_bad > 1e-6, f"fitting rescued a wrong form: {s_bad}"
+print("fitting does not rescue a wrong functional form  ✓")
 
 # --------------------------------------------------------------- agent suite ----
 at = g["gen_agent"](16, rng)

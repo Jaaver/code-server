@@ -117,6 +117,21 @@ assert SK.retrieve("math", "anything") == []
 SK.save(); assert os.path.exists(SK.path)
 print(f"skill library: {len(SK)} entries, retrieval ranks tier3 first -> {hits[0]['desc'][:40]!r}")
 
+# ------------------------------------------------- retrieval keys carry no leak ----
+# The property that matters is not "the string avoids certain words" - a shape signature may
+# honestly say "transpose" because the shape flipped. It is that the descriptor is a pure
+# function of what the model is shown. Strip every privileged field and require the same key.
+PRIVILEGED = {"grid": ["rule"], "sci": ["name", "expr"], "agent": ["tier", "opt", "max_steps"]}
+for tasks, fn in ((gt, "_grid_shape_desc"), (st, "_sci_desc"), (at, "_agent_desc")):
+    for t in tasks:
+        blind = {k: v for k, v in t.items() if k not in PRIVILEGED[t["domain"]]}
+        assert g[fn](blind) == g[fn](t), (
+            f"{fn} reads a field the model never sees: {t['domain']}")
+print("skill-retrieval keys are derived only from what the model is shown:")
+print("  grid  ->", g["_grid_shape_desc"](gt[0]))
+print("  sci   ->", g["_sci_desc"](st[0]))
+print("  agent ->", g["_agent_desc"](at[0]))
+
 # --------------------------------------------------------- prompt/extraction ----
 assert g["extract_code"]("blah\n```python\ndef f():\n    return 1\n```\nend") == "def f():\n    return 1"
 assert "def transform" in g["extract_code"]("here you go\ndef transform(g):\n    return g")

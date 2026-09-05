@@ -33,7 +33,7 @@ STATE_DIR = os.environ.get("PRISM_STATE") or (
 os.makedirs(STATE_DIR, exist_ok=True)
 
 PRESETS = {
-    "quick":    dict(time_budget=3600, n_math=20, n_grid=14, n_sci=5,  n_agent=12,
+    "quick":    dict(time_budget=4200, n_math=20, n_grid=14, n_sci=5,  n_agent=12,
                      k_math=6, k_grid=8, k_sci=8, k_agent=6, sci_rounds=3,
                      evo_rounds=2, evo_tasks=48, sft_steps=90),
     "standard": dict(time_budget=6000, n_math=40, n_grid=28, n_sci=8,  n_agent=20,
@@ -790,7 +790,7 @@ def _grid_prompt(t, feedback=None):
     u = ("Induce the single transformation rule that maps every IN grid to its OUT grid.\n\n" + ex +
          "\nWrite exactly one function:\n```python\ndef transform(g):\n    # g: list[list[int]] -> list[list[int]]\n"
          "    ...\n```\nIt must reproduce every example above exactly. No explanation." +
-         _skill_block("grid", " ".join(str(x) for x in [len(t['train'][0][0]), len(t['train'][0][1])])))
+         _skill_block("grid", _grid_shape_desc(t)))
     if feedback:
         u += "\n\nYour previous attempt was rejected:\n" + feedback + "\nFix it and return the full function again."
     return [{"role": "system", "content": SYS_SOLVER}, {"role": "user", "content": u}]
@@ -848,6 +848,30 @@ def prism_grid(llm, tasks, k=8, rounds=2):
     return ok, traces
 
 # --------------------------------------- PRISM: symbolic law discovery (FunSearch) --
+def _sci_desc(t):
+    """A retrieval key computed only from what the model is actually shown — the data table.
+    Using the law's name here would let the skill library see privileged task identity."""
+    rows, nv = t["rows"], t["nvars"]
+    ys = [r[-1] for r in rows]; my = sum(ys) / len(ys)
+    parts = [f"law {nv}vars"]
+    for j in range(nv):
+        xs = [r[j] for r in rows]; mx = sum(xs) / len(xs)
+        cov = sum((a - mx) * (bb - my) for a, bb in zip(xs, ys))
+        parts.append(f"x{j}" + ("rising" if cov > 0 else "falling"))
+    lo, hi = min(ys), max(ys)
+    parts.append("allpositive" if lo > 0 else "signed")
+    parts.append("widerange" if (hi - lo) > 100 * max(1e-9, abs(my)) else
+                 "narrowrange" if (hi - lo) < abs(my) else "midrange")
+    return " ".join(parts)
+
+def _agent_desc(t):
+    """Same principle: describe the puzzle by what is visible in the grid itself."""
+    flat = "".join(t["grid"])
+    return ("planner bfs %dx%d grid %d items %d keys %d doors ordered pickup" %
+            (len(t["grid"]), len(t["grid"][0]),
+             sum(c.isdigit() for c in flat), sum(c in KEYS for c in flat),
+             sum(c in DOORS for c in flat)))
+
 def sci_score_expr(expr, t):
     """Normalised MSE of a candidate closed form on the full data. Lower is better."""
     if not expr or len(expr) > 400: return (1e18, "empty")
@@ -884,7 +908,7 @@ def prism_sci(llm, tasks, k=8, rounds=3):
                       "DIFFERENT and better law, do not repeat them:\n")
                 for s, e in pop[:4]:
                     u += f"  err={s:.3e}   return {e}\n"
-            u += _skill_block("sci", t["name"])
+            u += _skill_block("sci", _sci_desc(t))
             prompts.append([{"role": "system", "content": SYS_SOLVER}, {"role": "user", "content": u}])
         outs = llm.chat(prompts, n=k, max_new_tokens=180, temperature=1.0)
         for i, (t, cands) in enumerate(zip(tasks, outs)):
@@ -931,7 +955,7 @@ def _agent_prompt(t, feedback=None):
          "(row, col, keys_held, items_collected) is the reliable approach):\n"
          "```python\ndef solve(grid):\n    # grid: list[str] -> return the action string, e.g. 'RRDDL'\n"
          "    ...\n```\nThen the harness will call it. Return only the code block." +
-         _skill_block("agent", "bfs grid keys doors items order tier%d" % t["tier"]))
+         _skill_block("agent", _agent_desc(t)))
     if feedback:
         u += "\n\nYour previous plan was rejected: " + feedback + "\nReturn a corrected full function."
     return [{"role": "system", "content": SYS_SOLVER}, {"role": "user", "content": u}]
@@ -1011,7 +1035,7 @@ def harvest(llm, tasks, k):
         for x in tr:
             if x["correct"] and x["code"]:
                 pairs.append((llm._render(_grid_prompt(x["task"])), "```python\n" + x["code"].strip() + "\n```"))
-                SKILLS.add("grid", "grid induction " + x["task"]["rule"], x["code"])
+                SKILLS.add("grid", _grid_shape_desc(x["task"]), x["code"])
     if by["sci"]:
         ok, close, tr = prism_sci(llm, by["sci"], k=max(4, k), rounds=2)
         stats["sci"] = (sum(ok), len(ok))
@@ -1019,14 +1043,14 @@ def harvest(llm, tasks, k):
             if x["nmse"] < 1e-6 and x["expr"]:
                 code = ("def f(" + ",".join(f"x{j}" for j in range(x["task"]["nvars"])) +
                         "):\n    return " + x["expr"])
-                SKILLS.add("sci", x["task"]["name"], code, score=1.0)
+                SKILLS.add("sci", _sci_desc(x["task"]), code, score=1.0)
     if by["agent"]:
         ok, tr = prism_agent(llm, by["agent"], k=k, rounds=3)
         stats["agent"] = (sum(ok), len(ok))
         for x in tr:
             if x["correct"] and x["code"]:
                 pairs.append((llm._render(_agent_prompt(x["task"])), "```python\n" + x["code"].strip() + "\n```"))
-                SKILLS.add("agent", "bfs planner tier%d keys doors ordered items" % x["task"]["tier"], x["code"])
+                SKILLS.add("agent", _agent_desc(x["task"]), x["code"])
     SKILLS.save()
     return pairs, stats
 
@@ -1245,7 +1269,7 @@ def main():
 
     rule("PHASE 5 — self-evolution: auto-curriculum -> exact verification -> skills + LoRA")
     llm.attach_lora()
-    curve = [dict(round=0, **{k: v for k, v in v0_acc.items()}, skills=len(SKILLS))]
+    curve = [dict(round=0, **v0_acc, skills=len(SKILLS))]
     frontier = dict(grid=2)
     all_pairs = []
     for rd in range(1, CFG["evo_rounds"] + 1):

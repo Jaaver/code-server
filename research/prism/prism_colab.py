@@ -46,10 +46,14 @@ PRESETS = {
 CFG = PRESETS[PRESET]
 TIME_BUDGET = float(os.environ.get("PRISM_TIME_BUDGET", CFG["time_budget"]))
 
+# Ordered by what actually engaged with these tasks in testing, not by nominal capability.
+# Qwen3-0.6B with its reasoning mode off answers grid induction with the identity function;
+# it is worth trying WITH reasoning (PRISM_MODEL=Qwen/Qwen3-0.6B PRISM_THINK=1) but that
+# costs roughly 4x the tokens, so it is not the default.
 MODEL_CANDIDATES = [
-    "Qwen/Qwen3-0.6B",
     "Qwen/Qwen2.5-0.5B-Instruct",
     "Qwen/Qwen2.5-Coder-0.5B-Instruct",
+    "Qwen/Qwen3-0.6B",
     "HuggingFaceTB/SmolLM2-360M-Instruct",
 ]
 if os.environ.get("PRISM_MODEL"):
@@ -1579,6 +1583,20 @@ def main():
     print(f"skill library: {len(SKILLS)} verified executable skills (persisted to {SKILLS.path})")
     print(f"llm calls: {llm.calls}   generated tokens: {llm.gen_tokens:,}   wall clock: {elapsed()/60:.1f} min")
 
+    print("\nwhere the scaffold helped, and where it did not:")
+    for d in ("math", "grid", "sci", "agent"):
+        lift = final[d] - base_acc[d]
+        if final[d] < 20 and lift < 5:
+            verdict = ("search cannot help here: the proposer never puts a correct program in the "
+                       "candidate set, and a verifier can only select, never invent")
+        elif lift >= 25:
+            verdict = "verification turned a failing proposer into a working solver"
+        elif lift > 5:
+            verdict = "the scaffold helped, but this suite is near the model's ceiling"
+        else:
+            verdict = "already solved, or unaffected by the scaffold"
+        print(f"  {d:<6} {base_acc[d]:5.1f} -> {final[d]:5.1f}   {verdict}")
+
     print("\nself-evolution curve (MEAN accuracy by round):")
     for c in curve:
         bar = "#" * int(round(c["MEAN"] / 2))
@@ -1609,6 +1627,13 @@ What is NOT demonstrated, and would be false to claim:
     remain far ahead, and no amount of Colab compute at this scale changes that.
   * The self-evolution loop improves in-distribution competence on families it can verify.
     It is not unbounded recursive self-improvement, and it saturates.
+
+The sharpest limit, and the one the per-suite verdicts above are there to expose:
+  A verifier SELECTS, it cannot INVENT. Wherever the model's samples never contain a correct
+  program, no amount of verification, refinement or voting produces one, and the suite stays
+  at zero no matter how much test-time compute is spent. Search multiplies a proposer that is
+  sometimes right; it does nothing for one that is never right. That boundary -- not parameter
+  count -- is what actually separates this system from a frontier model.
 
 To keep evolving (each call is another autonomous round, state persists in %s):
     evolve_more(3)

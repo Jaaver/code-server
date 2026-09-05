@@ -111,6 +111,27 @@ able to flatter this system.
 
 The run asserts `n_params < 1e9` and aborts if the constraint is violated.
 
+## Measured limits
+
+Testing against real sub-1B weights (Qwen2.5-0.5B-Instruct, Qwen2.5-Coder-0.5B-Instruct and
+Qwen3-0.6B, on CPU) found a hard boundary worth stating up front, because the run prints
+per-suite verdicts that will show it to you:
+
+* **`math` works.** The stack solved multi-step problems 2/2 where a single greedy pass scored
+  0 — the model can write a correct program, and the sandbox plus voting finds it.
+* **`grid` does not.** Across four prompt designs, two model families, grid-block rendering,
+  invariant inference and `k = 8`, every configuration scored 0/3 on rules as simple as
+  `flipud`. The proposals were never close, so there was nothing for the verifier to select.
+
+That asymmetry is the most useful thing this repo measures: **a verifier selects, it cannot
+invent.** Where the model's sample set contains a correct program, verification converts a
+failing model into a working solver. Where it does not, no amount of test-time compute helps,
+and the suite stays at zero. Search multiplies a proposer that is sometimes right; it does
+nothing for one that is never right.
+
+The `grid` suite is deliberately kept in the benchmark for exactly this reason. Dropping the
+suite the system fails would make the table look better and mean less.
+
 ## What this is not
 
 It is not a superintelligence, it does not beat frontier models or humans in general, and the

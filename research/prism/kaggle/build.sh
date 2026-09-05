@@ -22,4 +22,9 @@ os.environ.setdefault("PRISM_DRIVE", "0")         # /kaggle/working persists as 
 PY
   cat ../prism_colab.py
 } > "$OUT/prism_run.py"
-echo "built $OUT/prism_run.py ($(wc -l < "$OUT/prism_run.py") lines)"
+# compile(), not ast.parse(): only compile() enforces rules like "__future__ must come
+# first", which is exactly how the first pushed version got through review and failed on
+# Kaggle instead of here.
+python3 -c "import sys; src=open(sys.argv[1]).read(); compile(src, sys.argv[1], 'exec')" \
+    "$OUT/prism_run.py"
+echo "built and compiled $OUT/prism_run.py ($(wc -l < "$OUT/prism_run.py") lines)"

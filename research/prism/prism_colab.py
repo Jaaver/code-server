@@ -18,7 +18,9 @@
 #      accumulated reusable skills, and that measurably self-improves over rounds.
 # =====================================================================================
 
-from __future__ import annotations
+# (no __future__ import on purpose: it must be the first statement in a file, which makes
+#  it impossible to prepend a settings preamble to this script - as the Kaggle packaging
+#  does - and nothing here needs it.)
 import os, sys, json, math, time, random, re, subprocess, tempfile, hashlib, traceback, shutil
 from collections import Counter, defaultdict
 
@@ -177,10 +179,39 @@ except Exception:
 np.random.seed(SEED)
 torch.manual_seed(SEED)
 
-HAS_CUDA = torch.cuda.is_available()
+def _cuda_usable():
+    """Is there a GPU this torch build can actually run on?
+
+    torch.cuda.is_available() only reports that a device exists. A Kaggle P100 (sm_60)
+    with a modern CUDA wheel has no compiled kernels for it, so every single generate()
+    raises cudaErrorNoKernelImageForDevice and the whole run scores zero while looking
+    like it worked. So: check the arch list for a clear message, then actually launch a
+    kernel and synchronise, because that is the only answer that cannot be wrong."""
+    if not torch.cuda.is_available():
+        return False, "no CUDA device"
+    try:
+        cap = torch.cuda.get_device_capability(0)
+        arch = f"sm_{cap[0]}{cap[1]}"
+        try: archs = list(torch.cuda.get_arch_list())
+        except Exception: archs = []
+        if archs and arch not in archs and not any(a.startswith("compute_") for a in archs):
+            return False, (f"{torch.cuda.get_device_name(0)} is {arch}; this torch build only "
+                           f"has kernels for {', '.join(archs)}")
+        x = torch.randn(128, 128, device="cuda")
+        v = float((x @ x).sum())            # forces a real launch and a sync
+        if v != v:
+            return False, "a GPU matmul returned NaN"
+        del x; torch.cuda.empty_cache()
+        return True, ""
+    except Exception as e:
+        return False, f"{type(e).__name__}: {str(e).splitlines()[0][:130]}"
+
+HAS_CUDA, _GPU_WHY = _cuda_usable()
 if HAS_CUDA:
     GPU = torch.cuda.get_device_name(0)
-    BF16 = torch.cuda.is_bf16_supported()
+    # bf16 needs Ampere or newer; is_bf16_supported() has been known to say yes on older
+    # cards where it is emulated and slow, so gate on compute capability directly.
+    BF16 = torch.cuda.get_device_capability(0)[0] >= 8
 else:
     GPU, BF16 = "cpu", False
 DTYPE = torch.bfloat16 if BF16 else (torch.float16 if HAS_CUDA else torch.float32)
@@ -188,7 +219,12 @@ DEV = "cuda" if HAS_CUDA else "cpu"
 log("torch %s | transformers %s | device=%s (%s) | dtype=%s | preset=%s",
     torch.__version__, transformers.__version__, DEV, GPU, str(DTYPE).split(".")[-1], PRESET)
 if not HAS_CUDA:
-    log("!! no GPU detected — shrinking workload (results will be weaker/slower)")
+    if torch.cuda.is_available():
+        log("!! a GPU is present but UNUSABLE: %s", _GPU_WHY)
+        log("!! falling back to CPU. On Kaggle, switch Accelerator to GPU T4 x2 (this "
+            "torch build has no kernels for a P100) and re-run to get the GPU speed back.")
+    else:
+        log("!! no GPU detected — shrinking workload (results will be weaker/slower)")
     for k in ("n_math","n_grid","n_sci","n_agent"): CFG[k] = max(3, CFG[k] // 4)
     # k may shrink but never below 4: at k=2 the vote has nothing to weigh and the whole
     # search-and-verify story degenerates into a single sample with extra steps
@@ -410,7 +446,33 @@ class LLM:
             cursor = idx[-1] + 1
         return results
 
+    @staticmethod
+    def _neutralise_torchao():
+        """peft's LoRA dispatcher probes for torchao and RAISES on a version mismatch
+        instead of skipping that backend. Kaggle ships torchao 0.10 against a peft that
+        wants >=0.16, which kills attach_lora outright. Nothing here uses torchao, so make
+        the probe report it absent."""
+        try:
+            import peft.import_utils as piu
+            try:
+                piu.is_torchao_available(); return
+            except Exception:
+                pass
+            piu.is_torchao_available = lambda *a, **k: False
+            import importlib
+            for mod in ("peft.tuners.lora.torchao", "peft.tuners.lora.model"):
+                try:
+                    m = importlib.import_module(mod)
+                    if hasattr(m, "is_torchao_available"):
+                        m.is_torchao_available = lambda *a, **k: False
+                except Exception:
+                    pass
+            log("  worked around the peft/torchao version mismatch (torchao is unused here)")
+        except Exception:
+            pass
+
     def attach_lora(self, r=16, alpha=32, resume_from=None):
+        self._neutralise_torchao()
         if resume_from and os.path.isdir(resume_from):
             try:
                 self.model = peft.PeftModel.from_pretrained(self.model, resume_from, is_trainable=True)
@@ -1691,7 +1753,17 @@ def main():
         len(ho), len(EVAL["grid"]) - len(ho))
 
     rule("PHASE 5 — self-evolution: auto-curriculum -> exact verification -> skills + LoRA")
-    llm.attach_lora(resume_from=os.path.join(STATE_DIR, "lora"))
+    # A failure here must not discard four completed phases. Self-evolution has two memory
+    # channels; if the parametric one cannot be built on this host, the non-parametric skill
+    # library still works, so carry on with that and say clearly which half is running.
+    try:
+        llm.attach_lora(resume_from=os.path.join(STATE_DIR, "lora"))
+        can_train = True
+    except Exception as e:
+        can_train = False
+        log("!! LoRA unavailable (%s: %s)", type(e).__name__, str(e).splitlines()[0][:160])
+        log("!! continuing with skill-library evolution only — no weight updates this run")
+    report["weight_updates"] = can_train
     curve = CK.get("curve") or [dict(round=0, **v0_acc, skills=len(SKILLS))]
     frontier = dict(grid=CK.get("frontier_grid", 2), agent=CK.get("frontier_agent", 1))
     all_pairs = [tuple(x) for x in CK.get("all_pairs", [])]
@@ -1747,9 +1819,13 @@ def main():
             frontier["agent"] = min(3, frontier.get("agent", 1) + 1)
             log("  curriculum: agent tasks now start at tier %d", frontier["agent"])
         all_pairs.extend(pairs)
-        tr = star_finetune(llm, all_pairs, steps=CFG["sft_steps"])
-        if tr: log("  STaR update on %d traces: loss %.3f -> %.3f",
-                   tr["n_pairs"], tr["loss_start"], tr["loss_end"])
+        if can_train:
+            tr = star_finetune(llm, all_pairs, steps=CFG["sft_steps"])
+            if tr: log("  STaR update on %d traces: loss %.3f -> %.3f",
+                       tr["n_pairs"], tr["loss_start"], tr["loss_end"])
+        elif pairs:
+            log("  %d verified traces kept as skills; no weight update (LoRA unavailable)",
+                len(pairs))
         # re-benchmarking is the expensive half, so on long presets it runs every Nth round
         if rd % EVAL_EVERY == 0 or MODE != "forever":
             acc, raw = evaluate(llm, f"PRISM v{rd} (evolved)", use_prism=True)
@@ -1830,6 +1906,9 @@ def main():
     print(f"sci generalisation: the {len(EVAL['sci'])} evaluated laws are disjoint from every law the "
           f"curriculum was allowed to generate")
     print(f"skill library: {len(SKILLS)} verified executable skills (persisted to {SKILLS.path})")
+    if not report.get("weight_updates", True):
+        print("NOTE: LoRA was unavailable on this host, so only the non-parametric half of "
+              "self-evolution ran. The skill library grew; the weights did not change.")
     print(f"llm calls: {llm.calls}   generated tokens: {llm.gen_tokens:,}   wall clock: {elapsed()/60:.1f} min")
 
     print("\nwhere the scaffold helped, and where it did not:")

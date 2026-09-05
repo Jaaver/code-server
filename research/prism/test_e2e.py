@@ -62,6 +62,10 @@ class MockLLM:
         else: self.by_gridworld["\n".join(t["grid"])]=t
     def _render(self,msgs): return "".join(m["content"] for m in msgs)
     def _answer(self,prompt):
+        if "Work through it step by step" in prompt:
+            for k,t in self.by_q.items():
+                if k in prompt: return self._math_cot(t)
+            return "no idea"
         for k,t in self.by_gridworld.items():
             if k in prompt: return self._agent(t)
         for k,t in self.by_grid.items():
@@ -72,8 +76,10 @@ class MockLLM:
             if k in prompt: return self._math(t)
         return "I do not know."
     def _math(self,t):
-        if "final numeric answer after" in "": pass
+        # the solver now asks for a program AND for prose reasoning; answer whichever it wants
         return f"```python\nprint({t['ans']!r})\n```"
+    def _math_cot(self,t):
+        return f"Working it through step by step ...\n#### {t['ans']}"
     def _grid(self,t):
         ops=t["rule"].split("+")
         if all(o in OPSRC for o in ops):
@@ -127,6 +133,37 @@ dud = Dud(allt); dud.p=0
 acc3,_ = G["evaluate"](dud, "PRISM (adversarial dud)", use_prism=True)
 assert acc3["grid"]==0 and acc3["sci"]==0 and acc3["agent"]==0, acc3
 print("adversarial dud proposer -> verifier awards 0 on grid/sci/agent (no leakage)  ✓")
+
+# ---- the two-format math vote: prose must break a tie when the programs disagree ----
+class Split(MockLLM):
+    """Programs disagree with each other and are all wrong; the prose reasoning is right."""
+    def __init__(self, tasks, pot_ok):
+        super().__init__(tasks, p_correct=1.0); self.pot_ok = pot_ok; self.n = 0
+    def chat(self, batch, n=1, **kw):
+        out = []
+        for msgs in batch:
+            p = self._render(msgs)
+            t = None
+            for kk, tt in self.by_q.items():
+                if kk in p: t = tt; break
+            if t is None: out.append(["no idea"] * n); continue
+            if "Work through it step by step" in p:
+                out.append([f"reasoning...\n#### {t['ans']}"] * n)
+            elif self.pot_ok:
+                out.append([f"```python\nprint({t['ans']!r})\n```"] * n)
+            else:
+                self.n += 1
+                out.append([f"```python\nprint({t['ans'] + 1000 + i + self.n}）\n```".replace("）", ")")
+                            for i in range(n)])
+        return out
+
+mt = E["math"]
+ok, _ = G["prism_math"](Split(mt, pot_ok=False), mt, k=6, refine=0)
+assert all(ok), f"prose vote failed to break a tie between disagreeing programs: {ok}"
+print("math: scattered wrong programs + consistent prose -> prose wins the vote  ✓")
+ok, _ = G["prism_math"](Split(mt, pot_ok=True), mt, k=6, refine=0)
+assert all(ok), "agreeing correct programs should win"
+print("math: agreeing executed programs still win  ✓")
 
 # ---- curriculum + harvest + skill growth ----
 G["star_finetune"] = lambda *a, **k: dict(n_pairs=len(a[1]), steps=0, loss_start=0, loss_end=0)

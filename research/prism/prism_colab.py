@@ -790,10 +790,25 @@ def _math_prompt(t, with_skills=True):
         "with print(). Use exact arithmetic where possible. No explanation, no input().")
     return [{"role": "system", "content": SYS_SOLVER}, {"role": "user", "content": u}]
 
-def prism_math(llm, tasks, k=6, refine=1):
-    prompts = [_math_prompt(t) for t in tasks]
-    outs = llm.chat(prompts, n=k, max_new_tokens=300, temperature=0.9)
+def _math_cot_prompt(t):
+    return [{"role": "system", "content": "You are a careful reasoner."},
+            {"role": "user", "content": t["q"] +
+             "\n\nWork through it step by step, then write the final numeric answer after '####'."}]
 
+def prism_math(llm, tasks, k=6, refine=1):
+    """Two reasoning formats, one vote.
+
+    Program-of-thought is far better at arithmetic but has to parse the story first, and on
+    word problems a 0.5B model sometimes reads the question correctly in prose while writing
+    the wrong program. Measured: PoT alone at low k scored below plain chain-of-thought on
+    GSM8K. So the budget is split and the answers pooled, with an executed program's answer
+    weighted above a hand-computed one because at least the arithmetic is guaranteed."""
+    k_pot = max(1, int(round(k * 0.6)))
+    k_cot = max(1, k - k_pot)
+    outs = llm.chat([_math_prompt(t) for t in tasks], n=k_pot, max_new_tokens=300, temperature=0.9)
+    cots = llm.chat([_math_cot_prompt(t) for t in tasks], n=k_cot, max_new_tokens=340, temperature=0.8)
+
+    W_EXEC, W_COT = 1.0, 0.7
     results, traces = [], []
     pending = []
     for ti, (t, cands) in enumerate(zip(tasks, outs)):
@@ -805,12 +820,17 @@ def prism_math(llm, tasks, k=6, refine=1):
             v = last_number(r["out"]) if r["ok"] else None
             if v is None: continue
             key = round(v, 6)
-            votes[key] += 1
+            votes[key] += W_EXEC
             best_code.setdefault(key, code)
+        for c in cots[ti]:
+            tail = c.split("####")[-1] if "####" in c else c
+            v = last_number(tail)
+            if v is None: continue
+            votes[round(v, 6)] += W_COT
         if votes:
-            val, cnt = votes.most_common(1)[0]
-            conf = cnt / max(1, k)
-            results.append(dict(pred=val, conf=conf, code=best_code[val]))
+            val, w = votes.most_common(1)[0]
+            results.append(dict(pred=val, conf=w / max(1e-9, sum(votes.values())),
+                                code=best_code.get(val)))
         else:
             results.append(None); pending.append(ti)
 
@@ -1239,7 +1259,7 @@ def harvest(llm, tasks, k):
         ok, tr = prism_math(llm, by["math"], k=k, refine=0)
         stats["math"] = (sum(ok), len(ok))
         for x in tr:
-            if x["correct"] and x["res"]:
+            if x["correct"] and x["res"] and x["res"].get("code"):
                 pairs.append((llm._render(_math_prompt(x["task"], with_skills=False)),
                               "```python\n" + x["res"]["code"].strip() + "\n```"))
                 SKILLS.add("math", x["task"]["q"][:180], x["res"]["code"])

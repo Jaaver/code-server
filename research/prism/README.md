@@ -118,7 +118,11 @@ Qwen3-0.6B, on CPU) found a hard boundary worth stating up front, because the ru
 per-suite verdicts that will show it to you:
 
 * **`math` works.** The stack solved multi-step problems 2/2 where a single greedy pass scored
-  0 — the model can write a correct program, and the sandbox plus voting finds it.
+  0 — the model can write a correct program, and the sandbox plus voting finds it. Measurement
+  also showed program-of-thought *alone* falling below plain chain-of-thought at low `k` on
+  GSM8K, because the model has to parse the story before it can write the program; the solver
+  therefore samples both formats and pools them into one vote, weighting an executed program
+  above a hand-computed answer.
 * **`grid` does not.** Across four prompt designs, two model families, grid-block rendering,
   invariant inference and `k = 8`, every configuration scored 0/3 on rules as simple as
   `flipud`. The proposals were never close, so there was nothing for the verifier to select.

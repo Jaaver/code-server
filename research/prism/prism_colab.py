@@ -823,15 +823,25 @@ def _grid_shape_desc(t):
             "grow tile scale mirror" if ho * wo > hi * wi else "shrink crop extract")
     return f"grid induction {hi}x{wi} to {ho}x{wo} {kind}"
 
+def _render_grid(g):
+    return "\n".join("      " + " ".join(str(c) for c in row) for row in g)
+
 def _grid_prompt(t, feedback=None):
-    ex = "".join(f"# example {i+1}\nIN  = {json.dumps(a)}\nOUT = {json.dumps(b)}\n"
-                 for i, (a, b) in enumerate(t["train"]))
+    # Rendered as a block as well as a literal: a row reversal or a transpose is obvious
+    # laid out as a grid and nearly invisible as a one-line list of lists.
+    ex = ""
+    for i, (a, bb) in enumerate(t["train"]):
+        ex += (f"# example {i+1}   ({len(a)}x{len(a[0])} -> {len(bb)}x{len(bb[0])})\n"
+               f"  IN:\n{_render_grid(a)}\n  OUT:\n{_render_grid(bb)}\n"
+               f"  (as literals: IN = {json.dumps(a)}  OUT = {json.dumps(bb)})\n")
     u = (_skill_block("grid", _grid_shape_desc(t)) +
          "Induce the single transformation rule that maps every IN grid to its OUT grid.\n\n" + ex +
          "\nWrite exactly one function:\n```python\ndef transform(g):\n    # g: list[list[int]] -> list[list[int]]\n"
          "    ...\n```\nIt must reproduce every example above exactly. Return plain Python lists.\n"
          "Do NOT call it, print anything, or write test cases - the harness calls it.\n"
-         "No explanation.")
+         "Format example only - if the rule were 'add 1 to every cell' you would answer\n"
+         "```python\ndef transform(g):\n    return [[c + 1 for c in row] for row in g]\n```\n"
+         "That is not the rule here. No explanation.")
     if feedback:
         u += "\n\nYour previous attempt was rejected:\n" + feedback + "\nFix it and return the full function again."
     return [{"role": "system", "content": SYS_SOLVER}, {"role": "user", "content": u}]
@@ -891,6 +901,37 @@ def prism_grid(llm, tasks, k=8, rounds=2):
     return ok, traces
 
 # --------------------------------------- PRISM: symbolic law discovery (FunSearch) --
+def _sci_scaling(t):
+    """Log-log least squares of |y| on the inputs — a scaling analysis, the first thing a
+    physicist does with a table like this. For a pure power law it recovers the exponents
+    exactly and R^2 goes to 1; otherwise it is a rough but useful hint. This is a TOOL the
+    solver is given, computed from the data by code; the single-pass controls never see it."""
+    rows, nv = t["rows"], t["nvars"]
+    pts = [r for r in rows if all(r[j] > 0 for j in range(nv)) and abs(r[-1]) > 0]
+    if len(pts) < max(8, nv + 3):
+        return "  (scaling analysis unavailable: the data are not all positive)"
+    try:
+        A = np.array([[math.log(r[j]) for j in range(nv)] + [1.0] for r in pts])
+        y = np.array([math.log(abs(r[-1])) for r in pts])
+        beta, *_ = np.linalg.lstsq(A, y, rcond=None)
+        pred = A @ beta
+        ss_res = float(((y - pred) ** 2).sum())
+        ss_tot = float(((y - y.mean()) ** 2).sum())
+        r2 = 1.0 - ss_res / max(ss_tot, 1e-12)
+    except Exception:
+        return "  (scaling analysis unavailable)"
+    ex = "  ".join(f"x{j}^{beta[j]:+.2f}" for j in range(nv))
+    out = [f"  log|y| vs log inputs:  y ~ C * {ex}     (R^2 = {r2:.4f})"]
+    if r2 > 0.999:
+        out.append("  R^2 is ~1, so the law is very likely exactly that power law - "
+                   "round the exponents to simple values and write it.")
+    else:
+        # deliberately generic: naming a concrete form here would leak a benchmark answer
+        out.append("  R^2 is below 1, so it is NOT a pure power law. Sums or differences of the "
+                   "inputs, a ratio of two such combinations, or a trig/exp/log of an input "
+                   "must be involved.")
+    return "\n".join(out)
+
 def _sci_desc(t):
     """A retrieval key computed only from what the model is actually shown — the data table.
     Using the law's name here would let the skill library see privileged task identity."""
@@ -975,6 +1016,8 @@ def prism_sci(llm, tasks, k=8, rounds=3):
                  "You are discovering a closed-form scientific law from measurements.\n"
                  "Columns: " + cols + "\n" +
                  "\n".join("  ".join(f"{v:g}" for v in r) for r in head) +
+                 "\n\nScaling analysis computed from all " + str(len(t["rows"])) + " rows:\n" +
+                 _sci_scaling(t) +
                  "\n\nWrite exactly one function, using only + - * / ** and math.sin/cos/exp/log/sqrt/pi:\n"
                  "```python\ndef f(" + ",".join(f"x{j}" for j in range(t["nvars"])) + "):\n    return ...\n```\n")
             if pop:
@@ -991,6 +1034,9 @@ def prism_sci(llm, tasks, k=8, rounds=3):
                 if not m: continue
                 expr = m.group(1).strip().rstrip(";")
                 if "x0" not in expr and t["nvars"] >= 1: continue
+                # parsimony as an explicit inductive bias: a law of this kind is short, and
+                # without a length cap the population fills with unfalsifiable curve fits
+                if len(expr) > 80: continue
                 s, eff, _ = sci_score_expr(expr, t, fit=True)
                 if s < 1e17: pops[i].append((s, eff))
             # Occam tiebreak: among candidates that fit equally well keep the shortest, so the

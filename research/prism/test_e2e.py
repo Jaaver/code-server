@@ -177,6 +177,13 @@ pairs, stats = G["harvest"](llm3, cur, k=4)
 print("harvest pass-rates:", {k:f"{a}/{b}" for k,(a,b) in stats.items()},
       f"| traces={len(pairs)} | skills {n0}->{len(G['SKILLS'])}")
 assert len(pairs) > 0 and len(G["SKILLS"]) > n0
+# every domain that can produce a program must contribute training data, sci included
+doms = [p[0] for p in pairs]
+assert any("closed-form scientific law" in d for d in doms), \
+    "a recovered law never became a training pair"
+assert any("Induce the single transformation" in d for d in doms)
+assert any("Grid world rules" in d for d in doms)
+print("verified traces from all four domains reach the weight update  \u2713")
 assert all(isinstance(p,tuple) and len(p)==2 and "```python" in p[1] for p in pairs)
 # retrieval now injects real skills into prompts
 blk = G["_skill_block"]("agent","bfs keys doors ordered items tier2")

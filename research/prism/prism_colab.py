@@ -1089,35 +1089,39 @@ def sci_score_expr(expr, t, fit=False):
         return (float(d["fit"]), e2, None)
     return (raw, expr, None)
 
+def _sci_prompt(t, pop=None):
+    """One definition of the law-discovery prompt, shared by the solver and by the
+    harvester that turns a verified discovery into training data."""
+    pop = pop or []
+    head = t["rows"][:14]
+    cols = " ".join(f"x{j}" for j in range(t["nvars"])) + "   y"
+    u = (_skill_block("sci", _sci_desc(t)) +
+         "You are discovering a closed-form scientific law from measurements.\n"
+         "Columns: " + cols + "\n" +
+         "\n".join("  ".join(f"{v:g}" for v in r) for r in head) +
+         "\n\nScaling analysis computed from all " + str(len(t["rows"])) + " rows:\n" +
+         _sci_scaling(t) +
+         "\n\nA multiplicative scale and an additive offset are fitted for you, so get the "
+         "FUNCTIONAL FORM right and do not worry about the constant in front.\n"
+         "Laws like this are almost always a product, a ratio, a power, or a single "
+         "trig/exp/sqrt of the inputs. Keep it SHORT - under 40 characters. No abs(), "
+         "no conditionals, no loops.\n"
+         "Write one function named f taking " + ", ".join(f"x{j}" for j in range(t["nvars"])) +
+         " and returning the expression, using only + - * / ** and "
+         "math.sin/cos/exp/log/sqrt/pi. Answer with the function and nothing else.\n")
+    if pop:
+        u += ("\nBest candidates so far (normalised error, lower is better) — propose a "
+              "DIFFERENT and better law, do not repeat them:\n")
+        for s, e in pop[:4]:
+            u += f"  err={s:.3e}   return {e}\n"
+    return [{"role": "system", "content": SYS_SOLVER}, {"role": "user", "content": u}]
+
 def prism_sci(llm, tasks, k=8, rounds=3):
     """LLM as a mutation operator inside an evolutionary loop scored by exact numeric fit."""
     pops = [[] for _ in tasks]      # list of (nmse, expr)
     for rd in range(rounds):
         if budget_left() < 90: break
-        prompts = []
-        for t, pop in zip(tasks, pops):
-            head = t["rows"][:14]
-            cols = " ".join(f"x{j}" for j in range(t["nvars"])) + "   y"
-            u = (_skill_block("sci", _sci_desc(t)) +
-                 "You are discovering a closed-form scientific law from measurements.\n"
-                 "Columns: " + cols + "\n" +
-                 "\n".join("  ".join(f"{v:g}" for v in r) for r in head) +
-                 "\n\nScaling analysis computed from all " + str(len(t["rows"])) + " rows:\n" +
-                 _sci_scaling(t) +
-                 "\n\nA multiplicative scale and an additive offset are fitted for you, so get the "
-                 "FUNCTIONAL FORM right and do not worry about the constant in front.\n"
-                 "Laws like this are almost always a product, a ratio, a power, or a single "
-                 "trig/exp/sqrt of the inputs. Keep it SHORT - under 40 characters. No abs(), "
-                 "no conditionals, no loops.\n"
-                 "Write one function named f taking " + ", ".join(f"x{j}" for j in range(t["nvars"])) +
-                 " and returning the expression, using only + - * / ** and "
-                 "math.sin/cos/exp/log/sqrt/pi. Answer with the function and nothing else.\n")
-            if pop:
-                u += ("\nBest candidates so far (normalised error, lower is better) — propose a "
-                      "DIFFERENT and better law, do not repeat them:\n")
-                for s, e in pop[:4]:
-                    u += f"  err={s:.3e}   return {e}\n"
-            prompts.append([{"role": "system", "content": SYS_SOLVER}, {"role": "user", "content": u}])
+        prompts = [_sci_prompt(t, pop) for t, pop in zip(tasks, pops)]
         outs = llm.chat(prompts, n=k, max_new_tokens=180, temperature=1.0)
         for i, (t, cands) in enumerate(zip(tasks, outs)):
             for c in cands:
@@ -1278,6 +1282,9 @@ def harvest(llm, tasks, k):
                 code = ("def f(" + ",".join(f"x{j}" for j in range(x["task"]["nvars"])) +
                         "):\n    return " + x["expr"])
                 SKILLS.add("sci", _sci_desc(x["task"]), code, score=1.0)
+                # a recovered law is training data too, not just a library entry
+                pairs.append((llm._render(_sci_prompt(x["task"])),
+                              "```python\n" + code + "\n```"))
     if by["agent"]:
         ok, tr = prism_agent(llm, by["agent"], k=k, rounds=3)
         stats["agent"] = (sum(ok), len(ok))

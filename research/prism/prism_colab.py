@@ -119,7 +119,9 @@ log("torch %s | transformers %s | device=%s (%s) | dtype=%s | preset=%s",
 if not HAS_CUDA:
     log("!! no GPU detected — shrinking workload (results will be weaker/slower)")
     for k in ("n_math","n_grid","n_sci","n_agent"): CFG[k] = max(3, CFG[k] // 4)
-    for k in ("k_math","k_grid","k_sci","k_agent"): CFG[k] = max(2, CFG[k] // 3)
+    # k may shrink but never below 4: at k=2 the vote has nothing to weigh and the whole
+    # search-and-verify story degenerates into a single sample with extra steps
+    for k in ("k_math","k_grid","k_sci","k_agent"): CFG[k] = max(4, CFG[k] // 2)
     CFG["evo_rounds"], CFG["evo_tasks"], CFG["sft_steps"] = 1, 16, 30
 
 # ------------------------------------------------------------------- code sandbox ---

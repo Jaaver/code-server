@@ -136,6 +136,15 @@ nothing for one that is never right.
 The `grid` suite is deliberately kept in the benchmark for exactly this reason. Dropping the
 suite the system fails would make the table look better and mean less.
 
+## Running without a GPU
+
+The script detects a missing GPU and shrinks the suites and sample counts so a CPU run still
+finishes, but a CPU run is a smoke test, not a measurement: with a quarter of the items and
+half the samples, one task is worth 25 points and the vote has almost nothing to weigh. A
+verified CPU run of the full pipeline took 54 minutes and scored zero across the board while
+the single-pass baseline scored 8.3 — and the report said so, in those words, rather than
+rounding it up. Use a T4.
+
 ## What this is not
 
 It is not a superintelligence, it does not beat frontier models or humans in general, and the

@@ -59,10 +59,15 @@ G["TIME_BUDGET"] = 100000
 llm, report = G["main"]()
 
 assert report["params"] < 1e9
-for key in ("baseline","prism_v0","prism_v1","curve","grid_heldout_v0","suite_sizes"):
+for key in ("baseline","baseline_sc","prism_v0","prism_v1","curve","grid_heldout_v0","suite_sizes"):
     assert key in report, f"missing {key}"
 assert len(report["curve"]) == 3, report["curve"]
 assert report["prism_v0"]["MEAN"] > report["baseline"]["MEAN"], "search must beat single pass"
+assert report["prism_v0"]["MEAN"] > report["baseline_sc"]["MEAN"], \
+    "verification must beat the compute-matched sampling control"
+print(f"\ncompute-matched control: base {report['baseline']['MEAN']:.1f} -> "
+      f"+self-consistency {report['baseline_sc']['MEAN']:.1f} -> "
+      f"+verification {report['prism_v0']['MEAN']:.1f}")
 ho_n, tr_n = report["grid_heldout_v0"][1], report["grid_heldout_v0"][3]
 assert ho_n > 0 and tr_n > 0, report["grid_heldout_v0"]
 # the curriculum must never leak a held-out rule family or an evaluated law

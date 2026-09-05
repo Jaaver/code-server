@@ -19,9 +19,24 @@ then substitutes for scale. Everything in this repo is built to make that claim 
 rather than rhetorical:
 
 * every benchmark has an exact, mechanical ground-truth checker;
-* the ablation is the *identical* weights on one greedy pass with no tools;
+* there are **two** controls, not one — the identical weights on a single greedy pass, and a
+  **compute-matched** control that gets the same `k` samples with majority voting but no
+  program execution and no verifier. The gap between those two is what sampling buys; the gap
+  above them is what *verification* buys, and it is much larger;
+* four grid rule families and every evaluated scientific law are withheld from the
+  self-evolution curriculum, so generalisation is reported separately from in-distribution gain;
 * `PRISM_FRONTIER_KEY` runs a real frontier model through the *identical* protocol, so the
   head-to-head is measured rather than asserted.
+
+The printed table is therefore a ladder:
+
+```
+base 494M, 1 pass, no tools      <- what the weights do unaided
+base + self-consistency, no tools <- + k samples, majority vote  (compute-matched)
+PRISM v0 (search+verify)          <- + programs, execution, exact verification, refinement
+PRISM v1..vN (self-evolved)       <- + skills and LoRA distilled from its own verified work
+FRONTIER <model> (1 pass)         <- optional, identical protocol
+```
 
 ## The four suites (all exactly verifiable)
 

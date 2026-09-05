@@ -15,7 +15,7 @@
 # =====================================================================================
 
 from __future__ import annotations
-import os, sys, json, math, time, random, re, subprocess, tempfile, textwrap, hashlib, traceback, shutil
+import os, sys, json, math, time, random, re, subprocess, tempfile, hashlib, traceback, shutil
 from collections import Counter, defaultdict
 
 T0 = time.time()
@@ -89,7 +89,7 @@ try:
 except Exception:
     _pip("-U", "peft"); import peft
 try:
-    import datasets                      # only used for the real GSM8K split
+    import datasets as _ds; del _ds      # only used for the real GSM8K split
 except Exception:
     _pip("datasets")
 from transformers import AutoTokenizer, AutoModelForCausalLM
@@ -266,7 +266,6 @@ class LLM:
         return results
 
     def attach_lora(self, r=16, alpha=32):
-        from peft import LoraConfig, get_peft_model
         targets = []
         names = {n.split(".")[-1] for n, _ in self.model.named_modules()}
         for cand in ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]:
@@ -620,7 +619,7 @@ def gen_agent(n, rng):
             free = [(r, c) for r in range(1, size-1) for c in range(1, size-1) if g[r][c] == "."]
             need = 2 + nitems + 2 * nkeys
             if len(free) < need + 3: continue
-            rng.shuffle(free); it = iter(free)
+            rng.shuffle(free)
             g[free[0][0]][free[0][1]] = "S"
             g[free[1][0]][free[1][1]] = "E"
             p = 2

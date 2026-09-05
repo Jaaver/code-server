@@ -682,12 +682,18 @@ SYS_SOLVER = ("You are PRISM, a precise program-writing reasoner. You always ans
               "with only the standard library.")
 
 def _skill_block(domain, query, k=2):
+    """Retrieved reference solutions, rendered as a PREAMBLE.
+
+    Prompts are truncated from the left when they overrun the window, so whatever sits
+    first is what gets dropped. Reference material is the right thing to lose; the task
+    itself is not. Hence this goes before the task, never after it."""
     hits = SKILLS.retrieve(domain, query, k=k)
     if not hits: return ""
-    parts = ["\n# Verified solutions you previously discovered for similar problems — reuse the pattern:"]
+    parts = ["# Verified solutions you discovered earlier for similar problems — reuse the "
+             "pattern where it applies, but solve the task below, not these:"]
     for h in hits:
-        parts.append("```python\n" + h["code"][:900] + "\n```")
-    return "\n".join(parts) + "\n"
+        parts.append("```python\n" + h["code"][:600] + "\n```")
+    return "\n".join(parts) + "\n\n"
 
 # ---------------------------------------------------------------- baseline (CoT) ----
 def baseline_batch(llm, tasks, max_new_tokens=320):
@@ -740,10 +746,10 @@ def baseline_selfconsistency(llm, tasks, k, max_new_tokens=320):
 
 # ------------------------------------------------------------- PRISM: math (PoT) ----
 def _math_prompt(t, with_skills=True):
-    u = ("Problem:\n" + t["q"] +
-         "\n\nWrite a Python program that computes the answer and prints ONLY the final number "
-         "with print(). Use exact arithmetic where possible. No explanation, no input().")
-    if with_skills: u += _skill_block("math", t["q"])
+    u = (_skill_block("math", t["q"]) if with_skills else "") + (
+        "Problem:\n" + t["q"] +
+        "\n\nWrite a Python program that computes the answer and prints ONLY the final number "
+        "with print(). Use exact arithmetic where possible. No explanation, no input().")
     return [{"role": "system", "content": SYS_SOLVER}, {"role": "user", "content": u}]
 
 def prism_math(llm, tasks, k=6, refine=1):
@@ -820,12 +826,12 @@ def _grid_shape_desc(t):
 def _grid_prompt(t, feedback=None):
     ex = "".join(f"# example {i+1}\nIN  = {json.dumps(a)}\nOUT = {json.dumps(b)}\n"
                  for i, (a, b) in enumerate(t["train"]))
-    u = ("Induce the single transformation rule that maps every IN grid to its OUT grid.\n\n" + ex +
+    u = (_skill_block("grid", _grid_shape_desc(t)) +
+         "Induce the single transformation rule that maps every IN grid to its OUT grid.\n\n" + ex +
          "\nWrite exactly one function:\n```python\ndef transform(g):\n    # g: list[list[int]] -> list[list[int]]\n"
          "    ...\n```\nIt must reproduce every example above exactly. Return plain Python lists.\n"
          "Do NOT call it, print anything, or write test cases - the harness calls it.\n"
-         "No explanation." +
-         _skill_block("grid", _grid_shape_desc(t)))
+         "No explanation.")
     if feedback:
         u += "\n\nYour previous attempt was rejected:\n" + feedback + "\nFix it and return the full function again."
     return [{"role": "system", "content": SYS_SOLVER}, {"role": "user", "content": u}]
@@ -965,7 +971,8 @@ def prism_sci(llm, tasks, k=8, rounds=3):
         for t, pop in zip(tasks, pops):
             head = t["rows"][:14]
             cols = " ".join(f"x{j}" for j in range(t["nvars"])) + "   y"
-            u = ("You are discovering a closed-form scientific law from measurements.\n"
+            u = (_skill_block("sci", _sci_desc(t)) +
+                 "You are discovering a closed-form scientific law from measurements.\n"
                  "Columns: " + cols + "\n" +
                  "\n".join("  ".join(f"{v:g}" for v in r) for r in head) +
                  "\n\nWrite exactly one function, using only + - * / ** and math.sin/cos/exp/log/sqrt/pi:\n"
@@ -975,7 +982,6 @@ def prism_sci(llm, tasks, k=8, rounds=3):
                       "DIFFERENT and better law, do not repeat them:\n")
                 for s, e in pop[:4]:
                     u += f"  err={s:.3e}   return {e}\n"
-            u += _skill_block("sci", _sci_desc(t))
             prompts.append([{"role": "system", "content": SYS_SOLVER}, {"role": "user", "content": u}])
         outs = llm.chat(prompts, n=k, max_new_tokens=180, temperature=1.0)
         for i, (t, cands) in enumerate(zip(tasks, outs)):
@@ -1029,14 +1035,13 @@ def _plan_from_text(txt):
     return best.upper()
 
 def _agent_prompt(t, feedback=None):
-    u = (AGENT_SPEC + "\nGrid:\n" + "\n".join(t["grid"]) +
+    u = (_skill_block("agent", _agent_desc(t)) + AGENT_SPEC + "\nGrid:\n" + "\n".join(t["grid"]) +
          "\n\nWrite exactly one function that PLANS the route (a breadth-first search over the state "
          "(row, col, keys_held, items_collected) is the reliable approach):\n"
          "```python\ndef solve(grid):\n    # grid: list[str] -> return the action string, e.g. 'RRDDL'\n"
          "    ...\n```\nDo NOT call it or print anything - the harness calls solve(grid) itself.\n"
          "If the grid is small enough to route by hand, replying with just the move string "
-         "(e.g. RRDDLU) is equally acceptable." +
-         _skill_block("agent", _agent_desc(t)))
+         "(e.g. RRDDLU) is equally acceptable.")
     if feedback:
         u += "\n\nYour previous plan was rejected: " + feedback + "\nReturn a corrected full function."
     return [{"role": "system", "content": SYS_SOLVER}, {"role": "user", "content": u}]

@@ -190,6 +190,28 @@ p = g["_agent_prompt"](at[0])
 assert "breadth-first" in p[1]["content"]
 print("prompt builders and parsers: ok")
 
+# retrieved skills must precede the task, so left-truncation drops references not the task
+SK2 = g["SkillLibrary"](os.path.join(TMP, "sk2.json"))
+_orig = g["SKILLS"]; g["SKILLS"] = SK2
+try:
+    for t in gt[:6]:
+        SK2.add("grid", g["_grid_shape_desc"](t), "def transform(g):\n    return g  # PLACEHOLDER")
+    for t in at[:4]:
+        SK2.add("agent", g["_agent_desc"](t), "def solve(grid):\n    return 'UD'  # PLACEHOLDER")
+    for t in st[:4]:
+        SK2.add("sci", g["_sci_desc"](t), "def f(x0):\n    return x0  # PLACEHOLDER")
+    SK2.add("math", mt[0]["q"][:180], "print(1)  # PLACEHOLDER")
+    checks = [("grid", g["_grid_prompt"](gt[0])[1]["content"], "Induce the single transformation"),
+              ("agent", g["_agent_prompt"](at[0])[1]["content"], "Grid world rules"),
+              ("math", g["_math_prompt"](mt[0])[1]["content"], "Problem:")]
+    for dom, body, marker in checks:
+        assert "PLACEHOLDER" in body, f"{dom}: no skill was retrieved into the prompt"
+        assert body.index("PLACEHOLDER") < body.index(marker), \
+            f"{dom}: retrieved skills come after the task, so truncation would eat the task"
+    print("retrieved skills precede the task in every prompt (truncation-safe)  ✓")
+finally:
+    g["SKILLS"] = _orig
+
 # ------------------------------------------------------ baseline check path -----
 t = mt[0]
 assert g["_baseline_check"](t, f"reasoning ... #### {t['ans']}")

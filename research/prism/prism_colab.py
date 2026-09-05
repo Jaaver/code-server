@@ -27,12 +27,37 @@ os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 os.environ.setdefault("DATASETS_VERBOSITY", "error")
 
 # ------------------------------------------------------------------ configuration ---
-PRESET = os.environ.get("PRISM_PRESET", "quick")     # quick | standard | full
-STATE_DIR = os.environ.get("PRISM_STATE") or (
-    "/content/prism_state" if os.path.isdir("/content") else os.path.join(os.getcwd(), "prism_state"))
+PRESET = os.environ.get("PRISM_PRESET", "tiny")      # tiny | quick | standard | full
+
+# ---- where state lives -------------------------------------------------------------
+# A Colab runtime dies when the tab closes or the machine sleeps, and /content dies with
+# it. Putting state on Drive means a disconnect costs nothing: re-run the cell and it
+# picks up from the last finished phase instead of starting over.
+def _pick_state_dir():
+    if os.environ.get("PRISM_STATE"):
+        return os.environ["PRISM_STATE"]
+    if os.environ.get("PRISM_DRIVE", "1") not in ("0", "off", "false"):
+        try:
+            from google.colab import drive           # only exists inside Colab
+            if not os.path.isdir("/content/drive/MyDrive"):
+                drive.mount("/content/drive")
+            if os.path.isdir("/content/drive/MyDrive"):
+                return "/content/drive/MyDrive/prism_state"
+        except Exception as e:
+            print(f"[PRISM] Drive not mounted ({type(e).__name__}); "
+                  f"state will be lost if the runtime dies. Set PRISM_DRIVE=0 to silence.")
+    return "/content/prism_state" if os.path.isdir("/content") else os.path.join(os.getcwd(), "prism_state")
+
+STATE_DIR = _pick_state_dir()
 os.makedirs(STATE_DIR, exist_ok=True)
+CKPT = os.path.join(STATE_DIR, "checkpoint.json")
 
 PRESETS = {
+    # ~12-20 min on a T4. The default, because a run you have to babysit for an hour is
+    # a worse experiment than a short one you can actually finish.
+    "tiny":     dict(time_budget=1500, n_math=10, n_grid=8,  n_sci=3,  n_agent=8,
+                     k_math=6, k_grid=8, k_sci=8, k_agent=6, sci_rounds=2,
+                     evo_rounds=1, evo_tasks=20, sft_steps=40),
     "quick":    dict(time_budget=4200, n_math=20, n_grid=14, n_sci=5,  n_agent=12,
                      k_math=6, k_grid=8, k_sci=8, k_agent=6, sci_rounds=3,
                      evo_rounds=2, evo_tasks=48, sft_steps=90),
@@ -339,7 +364,19 @@ class LLM:
             cursor = idx[-1] + 1
         return results
 
-    def attach_lora(self, r=16, alpha=32):
+    def attach_lora(self, r=16, alpha=32, resume_from=None):
+        if resume_from and os.path.isdir(resume_from):
+            try:
+                self.model = peft.PeftModel.from_pretrained(self.model, resume_from, is_trainable=True)
+                for n, p in self.model.named_parameters():
+                    if p.requires_grad: p.data = p.data.float()
+                n_tr = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
+                self.model.eval()
+                log("LoRA adapter RESUMED from %s | trainable %.2fM", resume_from, n_tr / 1e6)
+                return n_tr
+            except Exception as e:
+                log("  saved adapter would not load (%s: %s) — attaching a fresh one",
+                    type(e).__name__, str(e)[:120])
         targets = []
         names = {n.split(".")[-1] for n, _ in self.model.named_modules()}
         for cand in ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]:
@@ -406,6 +443,30 @@ class SkillLibrary:
     def __len__(self): return len(self.items)
 
 SKILLS = SkillLibrary(os.path.join(STATE_DIR, "skills.json"))
+
+# ------------------------------------------------------------------- checkpoints ---
+def ckpt_load():
+    """Resume state from a previous run. PRISM_FRESH=1 ignores it and starts over."""
+    if os.environ.get("PRISM_FRESH", "0") in ("1", "true", "on"):
+        return {}
+    try:
+        d = json.load(open(CKPT))
+    except Exception:
+        return {}
+    if d.get("preset") != PRESET or d.get("seed") != SEED:
+        log("checkpoint belongs to a different preset/seed — starting fresh")
+        return {}
+    return d
+
+def ckpt_save(d):
+    """Write atomically: a runtime that dies mid-write must not leave a corrupt file."""
+    d["preset"], d["seed"] = PRESET, SEED
+    try:
+        tmp = CKPT + ".tmp"
+        with open(tmp, "w") as f: json.dump(d, f)
+        os.replace(tmp, CKPT)
+    except Exception as e:
+        log("  !! could not write checkpoint (%s: %s)", type(e).__name__, str(e)[:120])
 
 # =====================================================================================
 #  BENCHMARK SUITES — every one has a cheap, exact, executable ground-truth verifier.
@@ -1503,7 +1564,13 @@ def _baseline_check(t, txt):
 # =====================================================================================
 def main():
     rng = random.Random(SEED)
+    CK = ckpt_load()
     rule("PHASE 1 — build held-out benchmark suites (all exactly verifiable)")
+    if CK:
+        done = [k for k in ("baseline", "baseline_sc", "prism_v0") if k in CK]
+        log("RESUMING from %s — finished: %s%s", CKPT, ", ".join(done) or "nothing",
+            f", {CK['rounds_done']} evolution round(s)" if CK.get("rounds_done") else "")
+        log("  (set PRISM_FRESH=1 to ignore this and start over)")
     EVAL["math"]  = load_gsm8k(CFG["n_math"], rng)
     EVAL["grid"]  = gen_grid(CFG["n_grid"], rng, difficulty=2)
     EVAL["sci"]   = gen_sci(CFG["n_sci"], rng)
@@ -1515,38 +1582,67 @@ def main():
 
     rule("PHASE 2 — load the sub-1B base model")
     llm = LLM(MODEL_CANDIDATES)
+    if CK.get("model") and CK["model"] != llm.model_id:
+        log("checkpoint was made with %s but %s loaded — starting fresh",
+            CK["model"], llm.model_id)
+        CK.clear()
+    CK["model"] = llm.model_id
     report = dict(model=llm.model_id, params=llm.n_params, preset=PRESET, device=DEV, gpu=GPU,
                   suite_sizes={d: len(EVAL[d]) for d in EVAL}, seed=SEED)
 
+    def phase(name, fn):
+        """Run a phase, or skip it if a previous run already finished it."""
+        if name in CK:
+            log("RESUME: %s already measured (MEAN %.1f) — skipping", name, CK[name]["MEAN"])
+            return CK[name]
+        acc = fn()
+        CK[name] = acc; ckpt_save(CK)
+        return acc
+
     rule("PHASE 3 — baseline: the same weights, one greedy pass, no tools, no search")
-    base_acc, _ = evaluate(llm, "BASE  (single-pass CoT)", use_prism=False)
+    base_acc = phase("baseline", lambda: evaluate(llm, "BASE  (single-pass CoT)", use_prism=False)[0])
     report["baseline"] = base_acc
 
     rule("PHASE 3b — compute-matched control: same k samples, majority vote, still no tools")
-    sc_acc, _ = evaluate(llm, "BASE+SC (k samples, no tools)", self_consistency=True)
+    sc_acc = phase("baseline_sc",
+                   lambda: evaluate(llm, "BASE+SC (k samples, no tools)", self_consistency=True)[0])
     report["baseline_sc"] = sc_acc
 
     rule("PHASE 4 — PRISM v0: verifier-guided test-time search on the same weights")
-    v0_acc, v0_raw = evaluate(llm, "PRISM v0 (search)", use_prism=True)
-    report["prism_v0"] = v0_acc
     ho = [i for i, t in enumerate(EVAL["grid"]) if set(t["rule"].split("+")) & GRID_HELDOUT]
     def grid_split(raw):
         h = [raw["grid"][i] for i in ho]
         d = [v for i, v in enumerate(raw["grid"]) if i not in set(ho)]
         return (100.0 * sum(h) / max(1, len(h)), len(h),
                 100.0 * sum(d) / max(1, len(d)), len(d))
-    report["grid_heldout_v0"] = grid_split(v0_raw)
+    if "prism_v0" in CK:
+        log("RESUME: PRISM v0 already measured (MEAN %.1f) — skipping", CK["prism_v0"]["MEAN"])
+        v0_acc = CK["prism_v0"]
+    else:
+        v0_acc, v0_raw = evaluate(llm, "PRISM v0 (search)", use_prism=True)
+        CK["prism_v0"] = v0_acc; CK["grid_heldout_v0"] = grid_split(v0_raw); ckpt_save(CK)
+    report["prism_v0"] = v0_acc
+    report["grid_heldout_v0"] = CK.get("grid_heldout_v0")
     log("grid split: %d tasks use held-out rule families (never in the curriculum), %d are trainable",
         len(ho), len(EVAL["grid"]) - len(ho))
 
     rule("PHASE 5 — self-evolution: auto-curriculum -> exact verification -> skills + LoRA")
-    llm.attach_lora()
-    curve = [dict(round=0, **v0_acc, skills=len(SKILLS))]
-    frontier = dict(grid=2)
-    all_pairs = []
+    llm.attach_lora(resume_from=os.path.join(STATE_DIR, "lora"))
+    curve = CK.get("curve") or [dict(round=0, **v0_acc, skills=len(SKILLS))]
+    frontier = dict(grid=CK.get("frontier_grid", 2))
+    all_pairs = [tuple(x) for x in CK.get("all_pairs", [])]
+    done_rounds = CK.get("rounds_done", 0)
+    if done_rounds:
+        log("RESUME: %d evolution round(s) already done, %d verified traces carried over",
+            done_rounds, len(all_pairs))
     for rd in range(1, CFG["evo_rounds"] + 1):
+        if rd <= done_rounds:
+            report[f"prism_v{rd}"] = CK.get(f"prism_v{rd}", v0_acc)
+            report["grid_heldout_v%d" % rd] = CK.get("grid_heldout_v%d" % rd)
+            continue
         if budget_left() < 420:
-            log("time budget exhausted — stopping evolution after %d round(s)", rd - 1); break
+            log("time budget exhausted — stopping evolution after %d round(s); "
+                "re-run this cell to continue from here", rd - 1); break
         log("--- evolution round %d/%d (skills=%d, %.0fs left) ---",
             rd, CFG["evo_rounds"], len(SKILLS), budget_left())
         tasks = build_curriculum(CFG["evo_tasks"], random.Random(SEED + 991 * rd), frontier)
@@ -1569,6 +1665,10 @@ def main():
         report["grid_heldout_v%d" % rd] = grid_split(raw)
         curve.append(dict(round=rd, **acc, skills=len(SKILLS)))
         report[f"prism_v{rd}"] = acc
+        CK.update({f"prism_v{rd}": acc, "grid_heldout_v%d" % rd: grid_split(raw),
+                   "rounds_done": rd, "curve": curve, "frontier_grid": frontier["grid"],
+                   "all_pairs": [list(x) for x in all_pairs[-400:]]})
+        ckpt_save(CK)
         json.dump(report, open(os.path.join(STATE_DIR, "report.json"), "w"), indent=2)
     report["curve"] = curve
     final = curve[-1]
@@ -1664,8 +1764,10 @@ The sharpest limit, and the one the per-suite verdicts above are there to expose
   sometimes right; it does nothing for one that is never right. That boundary -- not parameter
   count -- is what actually separates this system from a frontier model.
 
-To keep evolving (each call is another autonomous round, state persists in %s):
-    evolve_more(3)
+If the runtime disconnected part-way, nothing was lost: re-run this cell and it resumes
+from the last finished phase. State lives in %s
+    evolve_more(3)      # another autonomous round, in a later cell
+    PRISM_FRESH=1       # ignore the checkpoint and start over
 """ % STATE_DIR)
 
     json.dump(report, open(os.path.join(STATE_DIR, "report.json"), "w"), indent=2)

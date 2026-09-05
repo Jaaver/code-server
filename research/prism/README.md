@@ -10,6 +10,16 @@ Runtime > Change runtime type > T4 GPU     (CPU works too, much slower)
 paste the whole file into one cell, run it
 ```
 
+**A disconnect costs you nothing.** Colab kills a runtime when the tab closes or the machine
+sleeps, and `/content` dies with it — so state goes to Google Drive (one mount click on the
+first run) and every phase checkpoints as it finishes. If the runtime drops, re-run the same
+cell: it prints what it is skipping and picks up from the last finished phase. `PRISM_FRESH=1`
+starts over deliberately.
+
+The default preset is `tiny` (~12-20 min on a T4) for the same reason. A run you have to sit
+and watch for an hour is a worse experiment than a short one you can actually finish, and the
+longer presets are there when you want them, not by default.
+
 ## The claim, stated precisely
 
 A 0.6B model cannot out-think a 1T frontier model. What it *can* do is win on problems where
@@ -98,7 +108,9 @@ measures the scaffold, and the scaffold is the claim.
 
 | env var | default | meaning |
 |---|---|---|
-| `PRISM_PRESET` | `quick` | `quick` / `standard` / `full` |
+| `PRISM_PRESET` | `tiny` | `tiny` (~12-20 min) / `quick` / `standard` / `full` |
+| `PRISM_DRIVE` | `1` | mount Google Drive so state survives the runtime dying; `0` keeps it in `/content` |
+| `PRISM_FRESH` | `0` | `1` ignores the checkpoint and re-runs every phase |
 | `PRISM_TIME_BUDGET` | preset | seconds; every phase degrades gracefully instead of hanging |
 | `PRISM_MODEL` | auto | forces a base model; the loader otherwise walks a fallback chain |
 | `PRISM_THINK` | `auto` | `auto` uses a chat template's reasoning mode when it has one, `0` forces it off, `1` forces it on. Reasoning tokens are test-time compute, so this trades wall-clock for quality |

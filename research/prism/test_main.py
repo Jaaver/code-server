@@ -36,7 +36,7 @@ REG = []
 class LiveMock(MK["MockLLM"]):
     """Re-indexes itself from whatever tasks the run has created so far."""
     def __init__(self, p): super().__init__([], p_correct=p); self.seen=0
-    def attach_lora(self, r=16, alpha=32): return 4_300_000
+    def attach_lora(self, r=16, alpha=32, resume_from=None): return 4_300_000
     def sync(self):
         pool = [t for v in G["EVAL"].values() for t in v] + REG
         if len(pool) != self.seen:
@@ -57,6 +57,25 @@ G["CFG"].update(n_math=6, n_grid=10, n_sci=4, n_agent=8, k_math=4, k_grid=4, k_s
 G["TIME_BUDGET"] = 100000
 
 llm, report = G["main"]()
+FIRST_CALLS = llm.calls
+
+# ---- a disconnect must cost nothing: a second run resumes, it does not redo work ----
+llm2, report2 = G["main"]()
+assert llm2.calls < FIRST_CALLS / 4, (
+    f"resume did not skip finished work: {FIRST_CALLS} calls first run, {llm2.calls} on resume")
+for k in ("baseline", "baseline_sc", "prism_v0", "curve"):
+    assert k in report2, f"resumed report lost {k}"
+assert report2["baseline"] == report["baseline"], "resume changed an already-measured result"
+assert len(report2["curve"]) == len(report["curve"]), "resume lost evolution rounds"
+print(f"\nresume: {FIRST_CALLS} model calls on the first run, {llm2.calls} on the second  \u2713")
+
+# ---- and PRISM_FRESH must genuinely start over ----
+import os as _os
+_os.environ["PRISM_FRESH"] = "1"
+llm3, _ = G["main"]()
+del _os.environ["PRISM_FRESH"]
+assert llm3.calls > FIRST_CALLS / 2, "PRISM_FRESH did not force a full re-run"
+print(f"PRISM_FRESH=1 forces a full re-run ({llm3.calls} calls)  \u2713")
 
 assert report["params"] < 1e9
 for key in ("baseline","baseline_sc","prism_v0","prism_v1","curve","grid_heldout_v0","suite_sizes"):

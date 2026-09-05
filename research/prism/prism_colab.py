@@ -1194,35 +1194,64 @@ def evaluate(llm, tag, use_prism=True, self_consistency=False):
     return acc, r
 
 def frontier_probe():
-    """Optional real head-to-head. Set PRISM_FRONTIER_KEY (+ optional _BASE / _MODEL) to run a
-    frontier model through the identical single-pass, no-tools protocol. Skipped otherwise."""
+    """Optional real head-to-head. Set PRISM_FRONTIER_KEY (+ optional _BASE / _MODEL / _K) to run
+    a frontier model through the identical protocol: same prompts, same grader, no tools.
+    PRISM_FRONTIER_K > 1 gives it the same self-consistency budget the control row gets.
+    Skipped entirely when no key is set."""
     key = os.environ.get("PRISM_FRONTIER_KEY")
     if not key: return None
     import urllib.request
     base = os.environ.get("PRISM_FRONTIER_BASE", "https://api.openai.com/v1")
     model = os.environ.get("PRISM_FRONTIER_MODEL", "gpt-4o")
-    def ask(prompt):
-        body = json.dumps(dict(model=model, temperature=0,
-                               messages=[{"role": "user", "content": prompt}])).encode()
-        req = urllib.request.Request(base.rstrip("/") + "/chat/completions", data=body,
+    kfr = max(1, int(os.environ.get("PRISM_FRONTIER_K", "1")))
+
+    def ask(prompt, temp):
+        payload = dict(model=model, messages=[{"role": "user", "content": prompt}])
+        if temp is not None: payload["temperature"] = temp
+        req = urllib.request.Request(base.rstrip("/") + "/chat/completions",
+                                     data=json.dumps(payload).encode(),
                                      headers={"Content-Type": "application/json",
                                               "Authorization": "Bearer " + key})
-        with urllib.request.urlopen(req, timeout=120) as f:
+        with urllib.request.urlopen(req, timeout=180) as f:
             return json.loads(f.read())["choices"][0]["message"]["content"]
-    log("frontier probe: %s via %s", model, base)
-    res = {}
+
+    def ask_retry(prompt, temp):
+        for attempt, t in enumerate((temp, None, temp)):      # some models reject temperature
+            try:
+                return ask(prompt, t)
+            except Exception as e:
+                err = f"{type(e).__name__}: {str(e)[:120]}"
+                if attempt == 2: raise RuntimeError(err)
+        return ""
+
+    log("frontier probe: %s via %s (k=%d, no tools, same grader)", model, base, kfr)
+    res, failures = {}, {}
     for d in ("math", "grid", "sci", "agent"):
-        hits = 0
+        hits = 0; asked = 0; failed = 0
         for t in EVAL[d]:
             try:
-                txt = ask(_baseline_prompt_text(t))
-                hits += int(_baseline_check(t, txt))
+                if kfr == 1:
+                    ok = _baseline_check(t, ask_retry(_baseline_prompt_text(t), 0))
+                else:
+                    votes = Counter()
+                    for _ in range(kfr):
+                        x = _baseline_extract(t, ask_retry(_baseline_prompt_text(t), 1.0))
+                        if x is not None: votes[x] += 1
+                    ok = bool(votes) and _baseline_check(t, _baseline_render(t, votes.most_common(1)[0][0]))
+                asked += 1; hits += int(ok)
             except Exception as e:
-                log("  frontier call failed: %s", str(e)[:120]); break
-        res[d] = 100.0 * hits / max(1, len(EVAL[d]))
-    res["MEAN"] = sum(res[d] for d in ("math", "grid", "sci", "agent")) / 4
-    res["model"] = model
-    return res
+                failed += 1
+                log("  frontier call failed on a %s item (%s) — excluded, not scored zero", d, str(e)[:100])
+                if failed >= 3:
+                    log("  giving up on the %s suite after 3 failures", d); break
+        # score only what actually got an answer; an unreachable API must not look like a wrong one
+        res[d] = (100.0 * hits / asked) if asked else float("nan")
+        if failed: failures[d] = failed
+    scored = [res[d] for d in ("math", "grid", "sci", "agent") if res[d] == res[d]]
+    res["MEAN"] = (sum(scored) / len(scored)) if scored else float("nan")
+    res["model"] = model + (f" (k={kfr})" if kfr > 1 else "")
+    if failures: res["failed_calls"] = failures
+    return res if scored else None
 
 def _baseline_prompt_text(t):
     if t["domain"] == "math":

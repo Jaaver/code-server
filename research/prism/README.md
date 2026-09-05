@@ -82,7 +82,12 @@ sub-1B base model ────┼─ exact verification (the four checkers above
 | `PRISM_PRESET` | `quick` | `quick` / `standard` / `full` |
 | `PRISM_TIME_BUDGET` | preset | seconds; every phase degrades gracefully instead of hanging |
 | `PRISM_MODEL` | auto | forces a base model; the loader otherwise walks a fallback chain |
-| `PRISM_FRONTIER_KEY` / `_BASE` / `_MODEL` | unset | run a real frontier head-to-head on the same protocol |
+| `PRISM_FRONTIER_KEY` / `_BASE` / `_MODEL` | unset | run a real frontier head-to-head on the same prompts and the same grader, no tools |
+| `PRISM_FRONTIER_K` | `1` | give the frontier model the same self-consistency budget as the control row |
+
+Any OpenAI-compatible endpoint works (`_BASE`). Calls that error out are excluded from the
+frontier's score and reported, never counted as wrong answers — an unreachable API must not be
+able to flatter this system.
 
 The run asserts `n_params < 1e9` and aborts if the constraint is violated.
 

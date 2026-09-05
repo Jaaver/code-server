@@ -134,6 +134,40 @@ def extract_code(text: str) -> str:
             return "\n".join(lines[i:]).strip()
     return text.strip()
 
+import ast as _ast
+
+def strip_to_definitions(code: str, required=None) -> str:
+    """Keep imports, assignments and definitions; drop trailing driver code.
+
+    Small models habitually append their own test harness -- `print(transform(IN))` --
+    which raises NameError against our harness and throws away an otherwise correct
+    function. Removing it recovers those candidates instead of scoring them wrong."""
+    try:
+        tree = _ast.parse(code)
+    except SyntaxError:
+        return code
+    keep, seen = [], False
+    for node in tree.body:
+        if isinstance(node, (_ast.Import, _ast.ImportFrom, _ast.FunctionDef,
+                             _ast.AsyncFunctionDef, _ast.ClassDef, _ast.Assign, _ast.AnnAssign)):
+            keep.append(node)
+            if required and isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef)) \
+               and node.name == required:
+                seen = True
+    if required and not seen:
+        return code                       # nothing to gain; let the real error surface
+    out = []
+    for node in keep:
+        seg = _ast.get_source_segment(code, node)
+        if seg: out.append(seg)
+    return "\n\n".join(out) if out else code
+
+COERCE = ("\ndef _tolist(x):\n"
+          "    if hasattr(x, 'tolist'): x = x.tolist()\n"
+          "    if isinstance(x, (list, tuple)):\n"
+          "        return [_tolist(v) for v in x]\n"
+          "    try:\n        return int(x)\n    except Exception:\n        return x\n")
+
 def run_python(code: str, timeout: float = 8.0, extra_files=None) -> dict:
     """Execute code in a fresh subprocess. Never raises: a failure is just {ok: False}."""
     d = None
@@ -788,18 +822,22 @@ def _grid_prompt(t, feedback=None):
                  for i, (a, b) in enumerate(t["train"]))
     u = ("Induce the single transformation rule that maps every IN grid to its OUT grid.\n\n" + ex +
          "\nWrite exactly one function:\n```python\ndef transform(g):\n    # g: list[list[int]] -> list[list[int]]\n"
-         "    ...\n```\nIt must reproduce every example above exactly. No explanation." +
+         "    ...\n```\nIt must reproduce every example above exactly. Return plain Python lists.\n"
+         "Do NOT call it, print anything, or write test cases - the harness calls it.\n"
+         "No explanation." +
          _skill_block("grid", _grid_shape_desc(t)))
     if feedback:
         u += "\n\nYour previous attempt was rejected:\n" + feedback + "\nFix it and return the full function again."
     return [{"role": "system", "content": SYS_SOLVER}, {"role": "user", "content": u}]
 
 def _grid_check(code, t):
-    """Run candidate transform on train pairs; if all match, return the predicted test grid."""
-    harness = (code + "\n\nimport json\n_T=" + json.dumps(t["train"]) + "\n_X=" +
+    """Run candidate transform on train pairs; if all match, return the predicted test grid.
+    Return values are normalised first, so a correct rule expressed with numpy still counts."""
+    code = strip_to_definitions(code, "transform")
+    harness = (code + "\n\nimport json\n" + COERCE + "_T=" + json.dumps(t["train"]) + "\n_X=" +
                json.dumps(t["test"][0]) + "\n_r=[]\n"
-               "for _a,_b in _T:\n    _r.append(transform([list(x) for x in _a])==_b)\n"
-               "print(json.dumps({'train':_r,'test':transform([list(x) for x in _X])}))\n")
+               "for _a,_b in _T:\n    _r.append(_tolist(transform([list(x) for x in _a]))==_b)\n"
+               "print(json.dumps({'train':_r,'test':_tolist(transform([list(x) for x in _X]))}))\n")
     r = run_python(harness, timeout=6)
     if not r["ok"]:
         return None, (r["err"].splitlines() or ["error"])[-1][:200]
@@ -949,10 +987,12 @@ def prism_sci(llm, tasks, k=8, rounds=3):
                 if "x0" not in expr and t["nvars"] >= 1: continue
                 s, eff, _ = sci_score_expr(expr, t, fit=True)
                 if s < 1e17: pops[i].append((s, eff))
+            # Occam tiebreak: among candidates that fit equally well keep the shortest, so the
+            # population drifts toward laws rather than toward elaborate curve fits.
             seen = set(); ded = []
-            for s, e in sorted(pops[i]):
+            for sc, e in sorted(pops[i], key=lambda pe: (pe[0], len(pe[1]))):
                 if e in seen: continue
-                seen.add(e); ded.append((s, e))
+                seen.add(e); ded.append((sc, e))
             pops[i] = ded[:6]
         best = [p[0][0] if p else 1e18 for p in pops]
         log("  sci round %d/%d: exact=%d/%d  median nmse=%.2e",
@@ -978,12 +1018,24 @@ AGENT_SPEC = (
  "  actions: 'U' up (row-1), 'D' down (row+1), 'L' left (col-1), 'R' right (col+1)\n"
  "The goal: collect every item in order, then reach 'E'.\n")
 
+def _plan_from_text(txt):
+    """Longest run of move letters in a reply, used when the model answers with a route
+    instead of a planner. Verified by the same simulator, so this loosens the input format
+    without loosening the standard of proof."""
+    if not txt: return ""
+    best = ""
+    for m in re.finditer(r"[UDLRudlr]{4,}", txt.replace(" ", "").replace(",", "")):
+        if len(m.group(0)) > len(best): best = m.group(0)
+    return best.upper()
+
 def _agent_prompt(t, feedback=None):
     u = (AGENT_SPEC + "\nGrid:\n" + "\n".join(t["grid"]) +
          "\n\nWrite exactly one function that PLANS the route (a breadth-first search over the state "
          "(row, col, keys_held, items_collected) is the reliable approach):\n"
          "```python\ndef solve(grid):\n    # grid: list[str] -> return the action string, e.g. 'RRDDL'\n"
-         "    ...\n```\nThen the harness will call it. Return only the code block." +
+         "    ...\n```\nDo NOT call it or print anything - the harness calls solve(grid) itself.\n"
+         "If the grid is small enough to route by hand, replying with just the move string "
+         "(e.g. RRDDLU) is equally acceptable." +
          _skill_block("agent", _agent_desc(t)))
     if feedback:
         u += "\n\nYour previous plan was rejected: " + feedback + "\nReturn a corrected full function."
@@ -1001,16 +1053,26 @@ def prism_agent(llm, tasks, k=6, rounds=3):
             t = tasks[i]; err = None; won = False
             for c in cands:
                 code = extract_code(c)
-                if "def solve" not in code: continue
-                harness = (code + "\n\ngrid=" + json.dumps(t["grid"]) +
-                           "\nr=solve(grid)\nprint(''.join(ch for ch in str(r).upper() if ch in 'UDLR'))\n")
-                r = run_python(harness, timeout=10)
-                if not r["ok"]:
-                    err = err or (r["err"].splitlines() or ["error"])[-1][:180]; continue
-                mv = (r["out"].splitlines() or [""])[-1].strip()
+                if "def solve" in code:
+                    code = strip_to_definitions(code, "solve")
+                    harness = (code + "\n\ngrid=" + json.dumps(t["grid"]) +
+                               "\nr=solve(grid)\nprint(''.join(ch for ch in str(r).upper() if ch in 'UDLR'))\n")
+                    r = run_python(harness, timeout=10)
+                    if not r["ok"]:
+                        err = err or (r["err"].splitlines() or ["error"])[-1][:180]; continue
+                    mv = (r["out"].splitlines() or [""])[-1].strip()
+                else:
+                    # a direct plan is a legitimate answer too — the simulator checks it either
+                    # way, so accepting one costs no rigour and small grids rarely need a search
+                    mv = _plan_from_text(c)
+                    if not mv:
+                        err = err or "no solve() function and no move string in the reply"; continue
                 good, why = agent_simulate(t["grid"], mv, t["max_steps"])
                 if good:
-                    done[i] = True; codes[i] = code; won = True; break
+                    done[i] = True
+                    codes[i] = code if "def solve" in code else \
+                        ("def solve(grid):\n    return %r" % mv)
+                    won = True; break
                 err = err or why
             if not won:
                 fb[i] = err or "no runnable plan produced"; nxt.append(i)

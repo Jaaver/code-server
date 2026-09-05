@@ -76,6 +76,27 @@ for t in gt:
     assert pred == t["test"][1], (t["rule"], err)
     n_ok += 1
 print(f"grid verifier: {n_ok} oracle programs accepted, all test outputs exact")
+# small models append their own driver; the harness must not lose a correct function to it
+t_id = [t for t in gt if t["rule"] == "transpose"] or [t for t in gt if t["rule"] == "fliplr"]
+tt = t_id[0]
+body = ("def transform(g):\n    return [list(r) for r in zip(*g)]\n" if tt["rule"] == "transpose"
+        else "def transform(g):\n    return [r[::-1] for r in g]\n")
+withdriver = body + "\n# Test cases\nprint(transform(IN))\nprint(transform(OUT))\n"
+pred, err = g["_grid_check"](withdriver, tt)
+assert pred == tt["test"][1], f"trailing driver code lost a correct function: {err}"
+print("trailing driver code stripped, correct function still credited  ✓")
+
+# a correct rule expressed with a non-list container must still count
+tuply = body.replace("return [list(r) for r in zip(*g)]", "return tuple(tuple(r) for r in zip(*g))") \
+            .replace("return [r[::-1] for r in g]", "return tuple(tuple(r[::-1]) for r in g)")
+pred, err = g["_grid_check"](tuply, tt)
+assert pred == tt["test"][1], f"tuple return rejected: {err}"
+print("non-list return values normalised before comparison  ✓")
+
+# stripping must be a no-op when the required function is missing, so real errors still surface
+assert g["strip_to_definitions"]("x = undefined_thing()", "transform") == "x = undefined_thing()"
+assert "def transform" in g["strip_to_definitions"](body, "transform")
+
 bad, err = g["_grid_check"]("def transform(g):\n    return [[0]]\n", gt[0])
 assert bad is None and err, "verifier must reject a wrong rule"
 print("grid verifier rejects a wrong rule with feedback:", err[:70])
@@ -121,6 +142,14 @@ for t in at:
     bad, why2 = g["agent_simulate"](t["grid"], "UUUU", t["max_steps"])
     assert not bad
 print("agent verifier: reference BFS plan accepted for all, junk plan rejected")
+# a reply that is just a route must be picked up, and must still be simulated, not trusted
+t = at[0]; sol = g["_agent_solve"](t["grid"])
+assert g["_plan_from_text"](f"I think the route is {sol} and that reaches the exit.") == sol
+assert g["_plan_from_text"]("no moves here") == ""
+assert g["_plan_from_text"](f"maybe {sol.lower()}") == sol
+bad_route = "U" * (t["max_steps"] + 5)
+assert not g["agent_simulate"](t["grid"], g["_plan_from_text"](bad_route), t["max_steps"])[0]
+print("agent: a bare route reply is extracted, then still checked by the simulator  ✓")
 print("  rejection message example:", why2)
 
 # ------------------------------------------------------------ skill library -----

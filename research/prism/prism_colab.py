@@ -242,15 +242,40 @@ class LLM:
         self.seq_batch = 48 if HAS_CUDA else 4
         self.calls = 0
         self.gen_tokens = 0
+        self.think = self._detect_thinking()
+        # reasoning needs room; a thought cut off mid-sentence produces no answer at all
+        self.tok_mult = 2.6 if self.think else 1.0
+        log("reasoning mode: %s (token budgets x%.1f)",
+            "ON" if self.think else "off", self.tok_mult)
+
+    def _detect_thinking(self):
+        """Does this chat template have a reasoning mode, and should we use it?
+
+        For a 0.6B model reasoning tokens ARE the test-time compute this whole system is
+        about, so when the template offers them we take them; PRISM_THINK=0 forces them off
+        and PRISM_THINK=1 forces them on."""
+        probe = [{"role": "user", "content": "hi"}]
+        try:
+            a = self.tok.apply_chat_template(probe, tokenize=False, add_generation_prompt=True,
+                                             enable_thinking=True)
+            b = self.tok.apply_chat_template(probe, tokenize=False, add_generation_prompt=True,
+                                             enable_thinking=False)
+            supported = (a != b)
+        except Exception:
+            supported = False
+        want = os.environ.get("PRISM_THINK", "auto").lower()
+        if want in ("0", "off", "false"): return False
+        if want in ("1", "on", "true"):   return supported
+        return supported
 
     def _render(self, messages):
-        try:
-            return self.tok.apply_chat_template(messages, tokenize=False,
-                                                add_generation_prompt=True, enable_thinking=False)
-        except TypeError:
-            pass
-        except Exception:
-            pass
+        if self.think is not None:
+            try:
+                return self.tok.apply_chat_template(messages, tokenize=False,
+                                                    add_generation_prompt=True,
+                                                    enable_thinking=self.think)
+            except Exception:
+                pass
         try:
             return self.tok.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
         except Exception:
@@ -258,9 +283,18 @@ class LLM:
             usr = "".join(m["content"] + "\n" for m in messages if m["role"] == "user")
             return f"{sysm}\n### Task\n{usr}\n### Response\n"
 
+    @staticmethod
+    def _strip_think(txt):
+        """Keep only what follows the reasoning block. A truncated thought yields nothing,
+        which is correct: an unfinished chain of reasoning is not an answer."""
+        if "</think>" in txt: return txt.split("</think>")[-1].strip()
+        if "<think>" in txt:  return ""
+        return txt
+
     @torch.no_grad()
     def chat(self, batch_messages, n=1, max_new_tokens=384, temperature=0.8, top_p=0.95):
         """batch_messages: list of message-lists. Returns list (len B) of lists (len n) of strings."""
+        max_new_tokens = int(max_new_tokens * self.tok_mult)
         prompts = [self._render(m) for m in batch_messages]
         results = [[] for _ in prompts]
         kw = dict(max_new_tokens=max_new_tokens, num_return_sequences=n,
@@ -295,7 +329,7 @@ class LLM:
             self.calls += 1; self.gen_tokens += int(gen.numel())
             txt = self.tok.batch_decode(gen, skip_special_tokens=True)
             for j, i in enumerate(idx):
-                results[i] = [t.strip() for t in txt[j * n:(j + 1) * n]]
+                results[i] = [self._strip_think(t).strip() for t in txt[j * n:(j + 1) * n]]
             cursor = idx[-1] + 1
         return results
 
@@ -826,6 +860,34 @@ def _grid_shape_desc(t):
 def _render_grid(g):
     return "\n".join("      " + " ".join(str(c) for c in row) for row in g)
 
+def _grid_invariants(t):
+    """Structural facts that hold across every example, computed by code.
+
+    The counterpart of the scaling analysis in the sci solver: invariant inference is
+    standard practice in program synthesis, it narrows the hypothesis class without naming
+    any rule, and the single-pass controls do not get it."""
+    pairs = t["train"]
+    f = []
+    same_shape = all(len(a) == len(b) and len(a[0]) == len(b[0]) for a, b in pairs)
+    swapped = all(len(a) == len(b[0]) and len(a[0]) == len(b) for a, b in pairs)
+    f.append("output shape equals input shape in every example" if same_shape else
+             "output dimensions are the input's, swapped" if swapped else
+             "output shape differs from the input's")
+    def bag(g): return sorted(c for row in g for c in row)
+    if all(bag(a) == bag(b) for a, b in pairs):
+        f.append("the multiset of cell values is unchanged, so cells are rearranged, not recoloured")
+    elif all(len(bag(a)) == len(bag(b)) for a, b in pairs):
+        f.append("the cell count is unchanged but the values are not, so values are being mapped")
+    if all(sorted(map(tuple, a)) == sorted(map(tuple, b)) for a, b in pairs):
+        f.append("the set of ROWS is unchanged, so whole rows are only reordered")
+    if all(sorted(zip(*a)) == sorted(zip(*b)) for a, b in pairs):
+        f.append("the set of COLUMNS is unchanged, so whole columns are only reordered")
+    if all(a == b for a, b in pairs):
+        f.append("input equals output (identity)")
+    if any(a == b for a, b in pairs) and not all(a == b for a, b in pairs):
+        f.append("at least one example is unchanged by the rule, but not all")
+    return "".join("  - " + x + "\n" for x in f)
+
 def _grid_prompt(t, feedback=None):
     # Rendered as a block as well as a literal: a row reversal or a transpose is obvious
     # laid out as a grid and nearly invisible as a one-line list of lists.
@@ -836,6 +898,7 @@ def _grid_prompt(t, feedback=None):
                f"  (as literals: IN = {json.dumps(a)}  OUT = {json.dumps(bb)})\n")
     u = (_skill_block("grid", _grid_shape_desc(t)) +
          "Induce the single transformation rule that maps every IN grid to its OUT grid.\n\n" + ex +
+         "\nFacts that hold across every example (computed for you):\n" + _grid_invariants(t) +
          "\nWrite one function named transform. It takes g, a list of rows where each row is a "
          "list of ints, and returns the transformed grid as plain Python lists. It must "
          "reproduce every example above exactly.\n"

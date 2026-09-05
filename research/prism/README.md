@@ -74,6 +74,7 @@ sampling — it is the same weights inside a scaffold. The scaffold contributes:
 | constant fitting (`sci`) | least-squares fits a scale and offset around a proposed skeleton | the standard skeleton+optimiser split in symbolic regression; the model must still supply the form |
 | scaling analysis (`sci`) | log-log regression of the data, passed into the prompt | what a physicist does first; recovers exponents for power laws and says "not a power law" otherwise, in deliberately generic terms so no benchmark answer is named |
 | grid rendering | lays pairs out as grids, not one-line lists | presentation, not information — the literals are shown too |
+| invariant inference (`grid`) | structural facts true of every example: shape relation, whether the value multiset is preserved, whether rows or columns are merely reordered | invariant inference is standard in program synthesis; it narrows the hypothesis class without naming any rule |
 | skill library | retrieves the system's own past verified solutions | its own work, earned under the same verifier |
 
 The single-pass and self-consistency controls get none of this. That is the point: the table
@@ -100,6 +101,7 @@ measures the scaffold, and the scaffold is the claim.
 | `PRISM_PRESET` | `quick` | `quick` / `standard` / `full` |
 | `PRISM_TIME_BUDGET` | preset | seconds; every phase degrades gracefully instead of hanging |
 | `PRISM_MODEL` | auto | forces a base model; the loader otherwise walks a fallback chain |
+| `PRISM_THINK` | `auto` | `auto` uses a chat template's reasoning mode when it has one, `0` forces it off, `1` forces it on. Reasoning tokens are test-time compute, so this trades wall-clock for quality |
 | `PRISM_FRONTIER_KEY` / `_BASE` / `_MODEL` | unset | run a real frontier head-to-head on the same prompts and the same grader, no tools |
 | `PRISM_FRONTIER_K` | `1` | give the frontier model the same self-consistency budget as the control row |
 

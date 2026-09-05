@@ -836,12 +836,11 @@ def _grid_prompt(t, feedback=None):
                f"  (as literals: IN = {json.dumps(a)}  OUT = {json.dumps(bb)})\n")
     u = (_skill_block("grid", _grid_shape_desc(t)) +
          "Induce the single transformation rule that maps every IN grid to its OUT grid.\n\n" + ex +
-         "\nWrite exactly one function:\n```python\ndef transform(g):\n    # g: list[list[int]] -> list[list[int]]\n"
-         "    ...\n```\nIt must reproduce every example above exactly. Return plain Python lists.\n"
-         "Do NOT call it, print anything, or write test cases - the harness calls it.\n"
-         "Format example only - if the rule were 'add 1 to every cell' you would answer\n"
-         "```python\ndef transform(g):\n    return [[c + 1 for c in row] for row in g]\n```\n"
-         "That is not the rule here. No explanation.")
+         "\nWrite one function named transform. It takes g, a list of rows where each row is a "
+         "list of ints, and returns the transformed grid as plain Python lists. It must "
+         "reproduce every example above exactly.\n"
+         "Do not call it, do not print, do not add test cases - the harness calls it.\n"
+         "Answer with the function and nothing else.")
     if feedback:
         u += "\n\nYour previous attempt was rejected:\n" + feedback + "\nFix it and return the full function again."
     return [{"role": "system", "content": SYS_SOLVER}, {"role": "user", "content": u}]
@@ -1018,8 +1017,14 @@ def prism_sci(llm, tasks, k=8, rounds=3):
                  "\n".join("  ".join(f"{v:g}" for v in r) for r in head) +
                  "\n\nScaling analysis computed from all " + str(len(t["rows"])) + " rows:\n" +
                  _sci_scaling(t) +
-                 "\n\nWrite exactly one function, using only + - * / ** and math.sin/cos/exp/log/sqrt/pi:\n"
-                 "```python\ndef f(" + ",".join(f"x{j}" for j in range(t["nvars"])) + "):\n    return ...\n```\n")
+                 "\n\nA multiplicative scale and an additive offset are fitted for you, so get the "
+                 "FUNCTIONAL FORM right and do not worry about the constant in front.\n"
+                 "Laws like this are almost always a product, a ratio, a power, or a single "
+                 "trig/exp/sqrt of the inputs. Keep it SHORT - under 40 characters. No abs(), "
+                 "no conditionals, no loops.\n"
+                 "Write one function named f taking " + ", ".join(f"x{j}" for j in range(t["nvars"])) +
+                 " and returning the expression, using only + - * / ** and "
+                 "math.sin/cos/exp/log/sqrt/pi. Answer with the function and nothing else.\n")
             if pop:
                 u += ("\nBest candidates so far (normalised error, lower is better) — propose a "
                       "DIFFERENT and better law, do not repeat them:\n")
@@ -1082,12 +1087,12 @@ def _plan_from_text(txt):
 
 def _agent_prompt(t, feedback=None):
     u = (_skill_block("agent", _agent_desc(t)) + AGENT_SPEC + "\nGrid:\n" + "\n".join(t["grid"]) +
-         "\n\nWrite exactly one function that PLANS the route (a breadth-first search over the state "
-         "(row, col, keys_held, items_collected) is the reliable approach):\n"
-         "```python\ndef solve(grid):\n    # grid: list[str] -> return the action string, e.g. 'RRDDL'\n"
-         "    ...\n```\nDo NOT call it or print anything - the harness calls solve(grid) itself.\n"
-         "If the grid is small enough to route by hand, replying with just the move string "
-         "(e.g. RRDDLU) is equally acceptable.")
+         "\n\nWrite one function named solve. It takes grid, a list of strings, and returns the "
+         "action string, for example RRDDL. A breadth-first search over the state "
+         "(row, col, keys_held, items_collected) is the reliable approach.\n"
+         "Do not call it and do not print - the harness calls solve(grid) itself.\n"
+         "If this grid is small enough to route by hand, replying with just the move string "
+         "such as RRDDLU is equally acceptable.")
     if feedback:
         u += "\n\nYour previous plan was rejected: " + feedback + "\nReturn a corrected full function."
     return [{"role": "system", "content": SYS_SOLVER}, {"role": "user", "content": u}]

@@ -190,6 +190,18 @@ p = g["_agent_prompt"](at[0])
 assert "breadth-first" in p[1]["content"]
 print("prompt builders and parsers: ok")
 
+# A fenced stub at the end of a prompt makes small models echo empty fences and copy the
+# demo instead of solving. With an empty library no prompt may contain a code fence.
+_sk = g["SKILLS"]; g["SKILLS"] = g["SkillLibrary"](os.path.join(TMP, "empty.json"))
+try:
+    for name, body in (("grid", g["_grid_prompt"](gt[0])[1]["content"]),
+                       ("agent", g["_agent_prompt"](at[0])[1]["content"]),
+                       ("math", g["_math_prompt"](mt[0])[1]["content"])):
+        assert "```" not in body, f"{name} prompt still ends in a fenced stub"
+    print("no prompt ships a fenced code stub for the model to echo  \u2713")
+finally:
+    g["SKILLS"] = _sk
+
 # retrieved skills must precede the task, so left-truncation drops references not the task
 SK2 = g["SkillLibrary"](os.path.join(TMP, "sk2.json"))
 _orig = g["SKILLS"]; g["SKILLS"] = SK2

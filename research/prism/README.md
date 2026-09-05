@@ -58,8 +58,26 @@ an adversarial dud proposer that must score exactly zero.
 sub-1B base model ────┼─ exact verification (the four checkers above)
                       ├─ self-consistency voting over k samples
                       ├─ error-driven refinement (the failure message goes back in)
+                      ├─ domain tools (below)
                       └─ skill retrieval from the library below
 ```
+
+### What PRISM is given that the controls are not
+
+This is the crux of reading the table honestly. PRISM is not the same prompt with more
+sampling — it is the same weights inside a scaffold. The scaffold contributes:
+
+| tool | what it does | why it is legitimate |
+|---|---|---|
+| sandbox | runs every candidate and feeds the traceback back | the model still has to write the program |
+| exact verifiers | decide correctness mechanically | they cannot be talked into a wrong answer — an always-wrong proposer scores exactly 0, and `test_e2e` asserts it |
+| constant fitting (`sci`) | least-squares fits a scale and offset around a proposed skeleton | the standard skeleton+optimiser split in symbolic regression; the model must still supply the form |
+| scaling analysis (`sci`) | log-log regression of the data, passed into the prompt | what a physicist does first; recovers exponents for power laws and says "not a power law" otherwise, in deliberately generic terms so no benchmark answer is named |
+| grid rendering | lays pairs out as grids, not one-line lists | presentation, not information — the literals are shown too |
+| skill library | retrieves the system's own past verified solutions | its own work, earned under the same verifier |
+
+The single-pass and self-consistency controls get none of this. That is the point: the table
+measures the scaffold, and the scaffold is the claim.
 
 ## Self-evolution — two channels of memory, zero human labels
 

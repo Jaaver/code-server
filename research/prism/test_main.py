@@ -55,6 +55,7 @@ G["LLM"] = lambda cands: LiveMock(0.5)
 G["CFG"].update(n_math=6, n_grid=10, n_sci=4, n_agent=8, k_math=4, k_grid=4, k_sci=4,
                 k_agent=4, sci_rounds=2, evo_rounds=2, evo_tasks=12, sft_steps=5)
 G["TIME_BUDGET"] = 100000
+G["MODE"] = "once"          # bounded path first; continuous mode is exercised below
 
 llm, report = G["main"]()
 FIRST_CALLS = llm.calls
@@ -100,3 +101,67 @@ print(f"\nheld-out grid families: {ho_n} eval tasks | curriculum families: {tr_n
 print("curriculum leakage check: none, in either grid rules or scientific laws  ✓")
 print("report.json persisted with the full evolution curve  ✓")
 print("MAIN-PATH TEST PASSED")
+
+# =====================================================================================
+#  CONTINUOUS MODE: the loop must keep going, stop cleanly, and resume where it stopped
+# =====================================================================================
+import os as _os, json as _json
+_os.environ["PRISM_FRESH"] = "1"
+
+# 1. forever mode keeps going past the preset's evo_rounds until the clock runs out
+G["MODE"] = "forever"; G["EVAL_EVERY"] = 1
+G["RESERVE_S"] = 0.1; G["FIRST_ROUND_S"] = 0.1
+G["TIME_BUDGET"] = 12.0; G["T0"] = __import__("time").time()
+G["CFG"]["evo_rounds"] = 1            # would have stopped at 1 in "once" mode
+llm4, rep4 = G["main"]()
+del _os.environ["PRISM_FRESH"]
+assert rep4["rounds_completed"] >= 2, (
+    f"forever mode stopped after {rep4['rounds_completed']} round(s) despite budget remaining")
+assert "min left" in rep4["stop_reason"] or "budget" in rep4["stop_reason"], rep4["stop_reason"]
+print(f"\nforever mode ran {rep4['rounds_completed']} rounds past evo_rounds=1, "
+      f"stopped because: {rep4['stop_reason'][:60]}  \u2713")
+
+# 2. a live status file exists and names the current round
+st = _json.load(open(_os.path.join(_os.environ["PRISM_STATE"], "status.json")))
+assert st["round"] == rep4["rounds_completed"] and st["running"] is False, st
+print(f"status.json tracks progress live and is marked finished at the end  \u2713")
+
+# 3. an interrupt stops the loop cleanly rather than losing the round
+_os.environ["PRISM_FRESH"] = "1"
+G["TIME_BUDGET"] = 60.0; G["T0"] = __import__("time").time()
+_orig_harvest = G["harvest"]
+_seen = {"n": 0}
+def _harvest_then_interrupt(llm, tasks, k):
+    _seen["n"] += 1
+    out = _orig_harvest(llm, tasks, k)
+    if _seen["n"] >= 2:                     # let one round finish, interrupt during the next
+        G["HALT"]["flag"] = True; G["HALT"]["why"] = "interrupted by you"
+    return out
+G["harvest"] = _harvest_then_interrupt
+llm5, rep5 = G["main"]()
+G["harvest"] = _orig_harvest; G["HALT"]["flag"] = False; G["HALT"]["why"] = ""
+del _os.environ["PRISM_FRESH"]
+assert rep5["stop_reason"] == "interrupted by you", rep5["stop_reason"]
+assert rep5["rounds_completed"] >= 1, rep5
+print(f"interrupt stopped the loop cleanly after {rep5['rounds_completed']} round(s), "
+      f"reason recorded as {rep5['stop_reason']!r}  \u2713")
+
+# 4. and the interrupted run resumes from the round it reached
+ck = _json.load(open(_os.path.join(_os.environ["PRISM_STATE"], "checkpoint.json")))
+assert ck["rounds_done"] == rep5["rounds_completed"], (ck["rounds_done"], rep5["rounds_completed"])
+G["TIME_BUDGET"] = 8.0; G["T0"] = __import__("time").time()   # keep the suite quick
+llm6, rep6 = G["main"]()
+assert rep6["rounds_completed"] >= rep5["rounds_completed"], "resume went backwards"
+print(f"resumed from round {ck['rounds_done']} and continued to "
+      f"{rep6['rounds_completed']}  \u2713")
+
+# 5. the skill library stays bounded no matter how long it runs
+SK = G["SkillLibrary"](_os.path.join(TMP, "cap.json"))
+SK.CAP = 40
+for i in range(400):
+    SK.add(["math","grid","sci","agent"][i % 4], f"desc {i}", f"def f{i}(): return {i}")
+assert len(SK) <= SK.CAP + 4, f"library grew to {len(SK)} past a cap of {SK.CAP}"
+assert len({i["domain"] for i in SK.items}) == 4, "eviction wiped out entire domains"
+print(f"skill library capped at {len(SK)} entries with all 4 domains surviving  \u2713")
+
+print("CONTINUOUS-MODE TESTS PASSED")

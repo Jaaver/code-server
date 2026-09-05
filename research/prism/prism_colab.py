@@ -66,19 +66,50 @@ PRESETS = {
     # a worse experiment than a short one you can actually finish.
     "tiny":     dict(time_budget=1500, n_math=10, n_grid=8,  n_sci=3,  n_agent=8,
                      k_math=6, k_grid=8, k_sci=8, k_agent=6, sci_rounds=2,
-                     evo_rounds=1, evo_tasks=20, sft_steps=40),
+                     evo_rounds=1, evo_tasks=20, sft_steps=40, eval_every=1),
     "quick":    dict(time_budget=4200, n_math=20, n_grid=14, n_sci=5,  n_agent=12,
                      k_math=6, k_grid=8, k_sci=8, k_agent=6, sci_rounds=3,
-                     evo_rounds=2, evo_tasks=48, sft_steps=90),
+                     evo_rounds=2, evo_tasks=48, sft_steps=90, eval_every=1),
     "standard": dict(time_budget=6000, n_math=40, n_grid=28, n_sci=8,  n_agent=20,
                      k_math=8, k_grid=12, k_sci=10, k_agent=8, sci_rounds=4,
-                     evo_rounds=3, evo_tasks=90, sft_steps=160),
+                     evo_rounds=3, evo_tasks=90, sft_steps=160, eval_every=2),
     "full":     dict(time_budget=13000, n_math=80, n_grid=50, n_sci=12, n_agent=32,
                      k_math=16, k_grid=16, k_sci=12, k_agent=12, sci_rounds=5,
-                     evo_rounds=4, evo_tasks=160, sft_steps=300),
+                     evo_rounds=4, evo_tasks=160, sft_steps=300, eval_every=2),
 }
 CFG = PRESETS[PRESET]
-TIME_BUDGET = float(os.environ.get("PRISM_TIME_BUDGET", CFG["time_budget"]))
+
+# ---- how long to run ---------------------------------------------------------------
+# "forever" keeps evolving round after round until you interrupt it or the host kills
+# the session; "once" does the original single benchmark-and-evolve pass.
+MODE = os.environ.get("PRISM_MODE", "forever").lower()
+MAX_HOURS = float(os.environ.get("PRISM_MAX_HOURS", "8.5"))   # inside a Kaggle GPU session
+if MODE == "forever":
+    TIME_BUDGET = float(os.environ.get("PRISM_TIME_BUDGET", MAX_HOURS * 3600))
+else:
+    TIME_BUDGET = float(os.environ.get("PRISM_TIME_BUDGET", CFG["time_budget"]))
+EVAL_EVERY = int(os.environ.get("PRISM_EVAL_EVERY", CFG.get("eval_every", 1)))
+RESERVE_S = 240.0        # kept back so the final report always gets written
+FIRST_ROUND_S = 30.0     # optimistic estimate for round 1, before anything has been timed
+
+# A SIGTERM from Kaggle at the session limit, or your Ctrl-C, must not throw away the
+# round in flight. First signal asks the loop to finish and checkpoint; a second one
+# gives up and dies the normal way. (HALT itself is declared above, next to the clock.)
+def _install_signal_handlers():
+    import signal
+    def handler(sig, frame):
+        if HALT["flag"]:
+            signal.signal(sig, signal.SIG_DFL); os.kill(os.getpid(), sig); return
+        HALT["flag"] = True
+        HALT["why"] = {getattr(signal, "SIGINT", 2): "interrupted by you",
+                       getattr(signal, "SIGTERM", 15): "host asked the process to stop"}.get(sig, f"signal {sig}")
+        print(f"\n[PRISM] {HALT['why']} — finishing the current step, checkpointing, then "
+              f"stopping cleanly. Signal again to force-quit.", flush=True)
+    for name in ("SIGINT", "SIGTERM"):
+        try: signal.signal(getattr(signal, name), handler)
+        except Exception: pass
+
+_install_signal_handlers()
 
 # Ordered by what actually engaged with these tasks in testing, not by nominal capability.
 # Qwen3-0.6B with its reasoning mode off answers grid induction with the identity function;
@@ -96,8 +127,14 @@ if os.environ.get("PRISM_MODEL"):
 SEED = 1337
 random.seed(SEED)
 
+HALT = {"flag": False, "why": ""}     # set by the signal handler installed below
+
 def elapsed():   return time.time() - T0
-def budget_left(): return TIME_BUDGET - elapsed()
+def budget_left():
+    # HALT collapses the remaining budget to zero, so every place that already checks the
+    # clock (harvest, the solvers, the SFT loop) also honours an interrupt without needing
+    # its own check bolted on.
+    return 0.0 if HALT["flag"] else TIME_BUDGET - elapsed()
 def log(msg, *a):
     print(f"[{elapsed():7.1f}s] " + (msg % a if a else msg), flush=True)
 def rule(t=""):
@@ -422,13 +459,29 @@ class SkillLibrary:
         self.df = Counter()
         for it in self.items: self.df.update(set(it["tokens"]))
 
+    CAP = int(os.environ.get("PRISM_SKILL_CAP", "600"))
+
     def add(self, domain, desc, code, score=1.0, meta=None):
         h = hashlib.sha1((domain + code).encode()).hexdigest()[:16]
         if any(it["h"] == h for it in self.items): return False
         it = dict(h=h, domain=domain, desc=desc, code=code, score=float(score),
                   tokens=toks(desc + " " + code)[:64], meta=meta or {}, t=time.time())
         self.items.append(it); self.df.update(set(it["tokens"]))
+        if len(self.items) > self.CAP: self._evict()
         return True
+
+    def _evict(self):
+        """Keep the library bounded over a long run, per domain so one domain that solves
+        easily cannot crowd out the others. Lowest score first, oldest breaks the tie."""
+        keep_per = max(1, self.CAP // 4)
+        kept = []
+        for dom in {i["domain"] for i in self.items}:
+            group = [i for i in self.items if i["domain"] == dom]
+            group.sort(key=lambda i: (-i["score"], -i["t"]))
+            kept.extend(group[:keep_per])
+        self.items = sorted(kept, key=lambda i: i["t"])
+        self.df = Counter()
+        for it in self.items: self.df.update(set(it["tokens"]))
 
     def retrieve(self, domain, query, k=2):
         cands = [it for it in self.items if it["domain"] == domain]
@@ -747,11 +800,13 @@ def agent_simulate(grid, actions, max_steps):
     if (r, c) != exit_: return False, f"ended at ({r},{c}) not at the exit {exit_}"
     return True, "goal reached"
 
-def gen_agent(n, rng):
+def gen_agent(n, rng, min_tier=1):
     tiers = [(5, 0, 1, 0), (7, 1, 2, 0), (7, 1, 3, 1), (9, 2, 3, 2)]
+    tiers = tiers[min_tier - 1:] or tiers[-1:]
     tasks = []
-    per = max(1, n // 4)
-    for ti, (size, _, nitems, nkeys) in enumerate(tiers):
+    per = max(1, n // max(1, len(tiers)))
+    for ti0, (size, _, nitems, nkeys) in enumerate(tiers):
+        ti = ti0 + (min_tier - 1)
         made = 0; guard = 0
         while made < per and guard < 400:
             guard += 1
@@ -1322,7 +1377,7 @@ def build_curriculum(n, rng, frontier):
             tasks += gen_sci(min(q, len(pool)), rng)
         finally:
             SCI_LAWS[:] = saved
-    tasks += gen_agent(q, rng)
+    tasks += gen_agent(q, rng, min_tier=frontier.get("agent", 1))
     rng.shuffle(tasks)
     return tasks
 
@@ -1638,22 +1693,44 @@ def main():
     rule("PHASE 5 — self-evolution: auto-curriculum -> exact verification -> skills + LoRA")
     llm.attach_lora(resume_from=os.path.join(STATE_DIR, "lora"))
     curve = CK.get("curve") or [dict(round=0, **v0_acc, skills=len(SKILLS))]
-    frontier = dict(grid=CK.get("frontier_grid", 2))
+    frontier = dict(grid=CK.get("frontier_grid", 2), agent=CK.get("frontier_agent", 1))
     all_pairs = [tuple(x) for x in CK.get("all_pairs", [])]
     done_rounds = CK.get("rounds_done", 0)
     if done_rounds:
         log("RESUME: %d evolution round(s) already done, %d verified traces carried over",
             done_rounds, len(all_pairs))
-    for rd in range(1, CFG["evo_rounds"] + 1):
-        if rd <= done_rounds:
-            report[f"prism_v{rd}"] = CK.get(f"prism_v{rd}", v0_acc)
-            report["grid_heldout_v%d" % rd] = CK.get("grid_heldout_v%d" % rd)
-            continue
-        if budget_left() < 420:
-            log("time budget exhausted — stopping evolution after %d round(s); "
-                "re-run this cell to continue from here", rd - 1); break
-        log("--- evolution round %d/%d (skills=%d, %.0fs left) ---",
-            rd, CFG["evo_rounds"], len(SKILLS), budget_left())
+    for rd in range(1, done_rounds + 1):
+        report[f"prism_v{rd}"] = CK.get(f"prism_v{rd}", v0_acc)
+        report["grid_heldout_v%d" % rd] = CK.get("grid_heldout_v%d" % rd)
+
+    if MODE == "forever":
+        log("MODE=forever: evolving round after round until you interrupt it, the host stops "
+            "it, or %.1f h elapse. Progress is checkpointed after every round.", MAX_HOURS)
+    stop_reason = "finished the planned rounds"
+    round_times = []
+    best_mean = max((c["MEAN"] for c in curve), default=0.0)
+    stale = 0
+    rd = done_rounds
+    while True:
+        if HALT["flag"]:
+            stop_reason = HALT["why"]; break
+        if MODE != "forever" and rd >= CFG["evo_rounds"]:
+            break
+        # Do not start a round we cannot finish: one killed half-way wastes its whole cost.
+        # Before any round has been timed there is nothing to extrapolate from, so attempt the
+        # first one on a token estimate -- every solver degrades against the clock internally,
+        # so an over-long first round truncates itself rather than overrunning.
+        need = (sum(round_times[-3:]) / len(round_times[-3:]) + RESERVE_S
+                if round_times else RESERVE_S + FIRST_ROUND_S)
+        if budget_left() < need:
+            def _dur(x): return f"{x:.0f}s" if x < 90 else f"{x/60:.0f} min"
+            stop_reason = (f"{_dur(max(0.0, budget_left()))} of budget left, less than the "
+                           f"~{_dur(need)} a round needs — stopping here so the report gets written")
+            break
+        rd += 1
+        t_round = time.time()
+        log("--- evolution round %d (skills=%d, %.0f min left, best MEAN %.1f) ---",
+            rd, len(SKILLS), budget_left() / 60, best_mean)
         tasks = build_curriculum(CFG["evo_tasks"], random.Random(SEED + 991 * rd), frontier)
         try:
             pairs, stats = harvest(llm, tasks, k=max(4, CFG["k_math"]))
@@ -1666,19 +1743,53 @@ def main():
         if "grid" in stats and stats["grid"][1] and stats["grid"][0] / stats["grid"][1] > 0.6:
             frontier["grid"] = min(3, frontier["grid"] + 1)
             log("  curriculum: grid difficulty -> %d", frontier["grid"])
+        if "agent" in stats and stats["agent"][1] and stats["agent"][0] / stats["agent"][1] > 0.6:
+            frontier["agent"] = min(3, frontier.get("agent", 1) + 1)
+            log("  curriculum: agent tasks now start at tier %d", frontier["agent"])
         all_pairs.extend(pairs)
         tr = star_finetune(llm, all_pairs, steps=CFG["sft_steps"])
         if tr: log("  STaR update on %d traces: loss %.3f -> %.3f",
                    tr["n_pairs"], tr["loss_start"], tr["loss_end"])
-        acc, raw = evaluate(llm, f"PRISM v{rd} (evolved)", use_prism=True)
-        report["grid_heldout_v%d" % rd] = grid_split(raw)
-        curve.append(dict(round=rd, **acc, skills=len(SKILLS)))
-        report[f"prism_v{rd}"] = acc
-        CK.update({f"prism_v{rd}": acc, "grid_heldout_v%d" % rd: grid_split(raw),
-                   "rounds_done": rd, "curve": curve, "frontier_grid": frontier["grid"],
+        # re-benchmarking is the expensive half, so on long presets it runs every Nth round
+        if rd % EVAL_EVERY == 0 or MODE != "forever":
+            acc, raw = evaluate(llm, f"PRISM v{rd} (evolved)", use_prism=True)
+            report["grid_heldout_v%d" % rd] = grid_split(raw)
+            curve.append(dict(round=rd, **acc, skills=len(SKILLS)))
+            report[f"prism_v{rd}"] = acc
+            CK["grid_heldout_v%d" % rd] = grid_split(raw)
+            CK[f"prism_v{rd}"] = acc
+            if acc["MEAN"] > best_mean + 0.5:
+                best_mean, stale = acc["MEAN"], 0
+            else:
+                stale += 1
+                if stale == 3:
+                    log("  no gain over the last 3 evaluations (best %.1f) — the loop has "
+                        "saturated on what it can verify; still running, but say so honestly",
+                        best_mean)
+        else:
+            log("  (skipping the benchmark this round; next at round %d)",
+                rd + (EVAL_EVERY - rd % EVAL_EVERY))
+        all_pairs = all_pairs[-600:]
+        CK.update({"rounds_done": rd, "curve": curve, "frontier_grid": frontier["grid"],
+                   "frontier_agent": frontier.get("agent", 1),
                    "all_pairs": [list(x) for x in all_pairs[-400:]]})
         ckpt_save(CK)
         json.dump(report, open(os.path.join(STATE_DIR, "report.json"), "w"), indent=2)
+        round_times.append(time.time() - t_round)
+        try:
+            json.dump(dict(round=rd, skills=len(SKILLS), best_mean=best_mean,
+                           elapsed_min=round(elapsed() / 60, 1),
+                           budget_left_min=round(budget_left() / 60, 1),
+                           mean_round_min=round(sum(round_times) / len(round_times) / 60, 1),
+                           traces=len(all_pairs), curve=curve[-8:], running=True),
+                      open(os.path.join(STATE_DIR, "status.json"), "w"), indent=2)
+        except Exception:
+            pass
+        log("  round %d done in %.1f min | skills=%d | traces=%d | best MEAN %.1f",
+            rd, round_times[-1] / 60, len(SKILLS), len(all_pairs), best_mean)
+    log("evolution stopped: %s (%d round(s) total)", stop_reason, rd)
+    report["rounds_completed"] = rd
+    report["stop_reason"] = stop_reason
     report["curve"] = curve
     final = curve[-1]
 
@@ -1773,14 +1884,26 @@ The sharpest limit, and the one the per-suite verdicts above are there to expose
   sometimes right; it does nothing for one that is never right. That boundary -- not parameter
   count -- is what actually separates this system from a frontier model.
 
-If the runtime disconnected part-way, nothing was lost: re-run this cell and it resumes
-from the last finished phase. State lives in %s
-    evolve_more(3)      # another autonomous round, in a later cell
-    PRISM_FRESH=1       # ignore the checkpoint and start over
+Nothing here is lost to an interruption. Every round is checkpointed as it finishes, so
+re-running this cell resumes from the last completed round rather than starting over --
+whether it stopped because you interrupted it, the host reclaimed the session, or the
+time limit was reached. State lives in %s
+
+    PRISM_MODE=once     stop after the planned rounds instead of running continuously
+    PRISM_MAX_HOURS=8.5 wall-clock ceiling; the loop stops early enough to write this report
+    PRISM_EVAL_EVERY=2  re-benchmark every Nth round instead of every round
+    PRISM_FRESH=1       ignore the checkpoint and start over
+    status.json         live progress, updated after every round while it runs
 """ % STATE_DIR)
 
     json.dump(report, open(os.path.join(STATE_DIR, "report.json"), "w"), indent=2)
     SKILLS.save()
+    try:
+        st = json.load(open(os.path.join(STATE_DIR, "status.json")))
+        st["running"] = False; st["stop_reason"] = report.get("stop_reason", "")
+        json.dump(st, open(os.path.join(STATE_DIR, "status.json"), "w"), indent=2)
+    except Exception:
+        pass
     log("report saved to %s", os.path.join(STATE_DIR, "report.json"))
     return llm, report
 

@@ -23,6 +23,30 @@ have Pro+ background execution. Three alternatives that genuinely run detached:
 
 Quotas and pricing on all of these move; check current terms rather than trusting this table.
 
+### Continuous operation
+
+The default is `PRISM_MODE=forever`: after the initial benchmark it keeps evolving round
+after round — new curriculum, verify, distil into skills and weights, re-benchmark — until
+one of three things happens.
+
+* **You interrupt it.** `SIGINT`/`SIGTERM` set a stop flag rather than killing the process:
+  the round in flight finishes, state is checkpointed, the report is printed. Signal twice to
+  force-quit.
+* **The host stops it.** Kaggle's `SIGTERM` at the session limit is handled the same way.
+* **The clock runs out.** `PRISM_MAX_HOURS` (default 8.5, sized to fit inside a Kaggle GPU
+  session) and the loop refuses to start a round it cannot finish, using the measured duration
+  of recent rounds, keeping back enough time to write the report.
+
+Every round is checkpointed as it completes, so re-running always continues from the last
+finished round. `status.json` is rewritten after each round with the live round number, skill
+count, best score and recent curve, so you can see progress mid-run without attaching to it.
+
+Over a long run the curriculum ramps on its own — grid difficulty and the minimum agent tier
+both rise once the system's own pass rate on them clears 60% — and the skill library is capped
+per domain so it cannot grow without bound or let one easy domain crowd out the rest. If the
+score stops improving for three evaluations the log says so plainly; it keeps running, but it
+does not pretend saturation is progress.
+
 **A disconnect costs you nothing.** Colab kills a runtime when the tab closes or the machine
 sleeps, and `/content` dies with it — so state goes to Google Drive (one mount click on the
 first run) and every phase checkpoints as it finishes. If the runtime drops, re-run the same
@@ -121,7 +145,11 @@ measures the scaffold, and the scaffold is the claim.
 
 | env var | default | meaning |
 |---|---|---|
-| `PRISM_PRESET` | `tiny` | `tiny` (~12-20 min) / `quick` / `standard` / `full` |
+| `PRISM_PRESET` | `tiny` | `tiny` (~12-20 min per pass) / `quick` / `standard` / `full` |
+| `PRISM_MODE` | `forever` | `forever` evolves until stopped; `once` does a single benchmark-and-evolve pass |
+| `PRISM_MAX_HOURS` | `8.5` | wall-clock ceiling in `forever` mode |
+| `PRISM_EVAL_EVERY` | preset | re-benchmark every Nth round; the expensive half of a round |
+| `PRISM_SKILL_CAP` | `600` | maximum skill-library entries before per-domain eviction |
 | `PRISM_DRIVE` | `1` | mount Google Drive so state survives the runtime dying; `0` keeps it in `/content` |
 | `PRISM_FRESH` | `0` | `1` ignores the checkpoint and re-runs every phase |
 | `PRISM_TIME_BUDGET` | preset | seconds; every phase degrades gracefully instead of hanging |

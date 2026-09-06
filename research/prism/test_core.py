@@ -225,12 +225,20 @@ try:
         SK2.add("sci", g["_sci_desc"](t), "def f(x0):\n    return x0  # PLACEHOLDER")
     SK2.add("math", mt[0]["q"][:180], "print(1)  # PLACEHOLDER")
     checks = [("grid", g["_grid_prompt"](gt[0])[1]["content"], "Induce the single transformation"),
-              ("agent", g["_agent_prompt"](at[0])[1]["content"], "Grid world rules"),
               ("math", g["_math_prompt"](mt[0])[1]["content"], "Problem:")]
+    big = [t for t in at if not (t["opt"] <= 14 and len(t["grid"]) <= 7)]
+    if big:
+        checks.append(("agent", g["_agent_prompt"](big[0])[1]["content"], "Grid world rules"))
     for dom, body, marker in checks:
         assert "PLACEHOLDER" in body, f"{dom}: no skill was retrieved into the prompt"
         assert body.index("PLACEHOLDER") < body.index(marker), \
             f"{dom}: retrieved skills come after the task, so truncation would eat the task"
+    # the small-grid routing prompt carries no skills on purpose: every stored agent skill is
+    # a solve() program, which is noise when the answer wanted is a bare move string
+    smalls = [t for t in at if t["opt"] <= 14 and len(t["grid"]) <= 7]
+    if smalls:
+        assert "PLACEHOLDER" not in g["_agent_prompt"](smalls[0])[1]["content"], \
+            "the routing prompt should not inject solve() programs"
     print("retrieved skills precede the task in every prompt (truncation-safe)  ✓")
 finally:
     g["SKILLS"] = _orig

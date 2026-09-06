@@ -2054,7 +2054,9 @@ def evolve_more(rounds=1, tasks_per_round=None, budget_s=2400):
     return acc
 
 _STATE = {}
-if __name__ == "__main__":
+# PRISM_NO_MAIN lets another script exec this file to reuse the suites, solvers and engine
+# without launching a full run -- which is how the diagnostic probes are built.
+if __name__ == "__main__" and os.environ.get("PRISM_NO_MAIN", "0") not in ("1", "true", "on"):
     try:
         _llm, _report = main()
         _STATE["llm"] = _llm; _STATE["report"] = _report

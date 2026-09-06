@@ -229,8 +229,19 @@ log("torch %s | transformers %s | device=%s (%s) | dtype=%s | preset=%s",
 if not HAS_CUDA:
     if torch.cuda.is_available():
         log("!! a GPU is present but UNUSABLE: %s", _GPU_WHY)
-        log("!! falling back to CPU. On Kaggle, switch Accelerator to GPU T4 x2 (this "
-            "torch build has no kernels for a P100) and re-run to get the GPU speed back.")
+        # Falling back to CPU here is correct for results and catastrophic for quota: the
+        # session is still billed as a GPU session. Two Kaggle runs burned about 12 of a
+        # 30-hour weekly allowance running on CPU because this used to continue silently.
+        if os.environ.get("PRISM_REQUIRE_GPU", "1") not in ("0", "off", "false"):
+            log("!! ABORTING rather than spending GPU-quota hours on CPU.")
+            log("!! On Kaggle the accelerator you get is not guaranteed by the request - both "
+                "of the runs that hit this asked for a T4 and were given a P100.")
+            log("!! Re-run once you have a supported card, or set PRISM_REQUIRE_GPU=0 to "
+                "continue on CPU deliberately.")
+            raise SystemExit(
+                f"GPU present but unusable ({_GPU_WHY}); refusing to burn a GPU session on CPU. "
+                f"Set PRISM_REQUIRE_GPU=0 to override.")
+        log("!! PRISM_REQUIRE_GPU=0 — continuing on CPU deliberately.")
     else:
         log("!! no GPU detected — shrinking workload (results will be weaker/slower)")
     for k in ("n_math","n_grid","n_sci","n_agent"): CFG[k] = max(3, CFG[k] // 4)

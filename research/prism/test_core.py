@@ -255,5 +255,13 @@ t = st[0]
 assert g["_baseline_check"](t, "y = " + t["expr"])
 print("baseline grader accepts correct answers and rejects wrong ones in all 4 domains")
 
+# an unusable GPU must abort, not quietly spend a GPU session doing CPU work
+src = open(PRISM).read()
+assert "ABORTING rather than spending GPU-quota hours on CPU" in src
+i, j = src.index("PRISM_REQUIRE_GPU"), src.index("raise SystemExit")
+assert i < j, "the abort must be gated on PRISM_REQUIRE_GPU"
+assert 'os.environ.get("PRISM_REQUIRE_GPU", "1")' in src, "abort must be the default"
+print("unusable GPU aborts by default, PRISM_REQUIRE_GPU=0 overrides  \u2713")
+
 print("\nFAILURES:", fails if fails else "none")
 print("ALL CORE TESTS PASSED")

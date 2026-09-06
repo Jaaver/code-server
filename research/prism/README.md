@@ -200,6 +200,47 @@ best-known weights, so an unattended loop cannot walk downhill for eight hours. 
 exposed that `tiny` prints a results table nobody should read as a measurement, so the report
 now says so itself.
 
+## Second and third runs: the powered head-to-head, and the reasoning probe
+
+Both are in `results/`. Both landed on a **P100**, which this torch build has no kernels for,
+so both fell back to CPU with quarter-size suites. The fallback is why the numbers exist at
+all rather than being silent zeros — but it also means neither ran at the size or speed asked
+for, and between them they consumed roughly 12 of a 30-hour weekly GPU allowance doing CPU
+work on GPU-billed sessions. The script now aborts instead (`PRISM_REQUIRE_GPU`).
+
+**The head-to-head, pooled with run 1** (37 + 10 math items):
+
+| | baseline | + self-consistency | PRISM |
+|---|---|---|---|
+| run 1 (tiny, real T4, n=10) | 40.0% | 50.0% | 30.0% |
+| run 2 (measure, CPU, n=37) | 40.5% | 40.5% | 29.7% |
+| **pooled, n=47** | **40.4%** | — | **29.8%** |
+
+PRISM is **10.6 points below the plain single pass**, two-proportion z = 1.08 — not
+significant, but the same direction in two independent runs. The mechanism is visible in the
+earlier CPU measurement: program-of-thought alone scores below plain chain-of-thought on
+GSM8K for this model, because it has to parse the story before it can write the program, and
+a confidently misread story produces a confidently wrong program that the executed-answer
+vote then weights *above* the prose answer. The scaffold's core mechanism is net-negative on
+the only suite where this model can do anything.
+
+Grid produced its first non-zero reading anywhere: **1/37 = 2.7%** for PRISM against 0/37 for
+the baseline, consistent with the 6.6% curriculum rate.
+
+**The reasoning probe** swept Qwen3-0.6B (751.6M params) at 400 tokens without reasoning and
+800/1600 with:
+
+| condition | grid: thought finished | grid solved | agent finished | agent solved |
+|---|---|---|---|---|
+| no reasoning, 400 tok | 100% | 0% | 100% | 0% |
+| reasoning, 800 tok | 3% | 0% | 0% | 0% |
+| reasoning, 1600 tok | 19% | 0% | 0% | 0% |
+
+Read this carefully: at 1600 tokens only 19% of samples closed their reasoning block, so the
+solved column rests on about six usable answers. It is **not** clean evidence that reasoning
+cannot help — it is evidence that reasoning at a budget this model needs is impractical here.
+The 1600-token grid trial alone took 3.2 hours, and the 2800-token trial never ran.
+
 ## Measured limits
 
 Testing against real sub-1B weights (Qwen2.5-0.5B-Instruct, Qwen2.5-Coder-0.5B-Instruct and

@@ -1,0 +1,60 @@
+{
+  "model": "Qwen/Qwen2.5-0.5B-Instruct",
+  "params": 494032768,
+  "preset": "measure",
+  "device": "cpu",
+  "gpu": "cpu",
+  "suite_sizes": {
+    "math": 37,
+    "grid": 37,
+    "sci": 6,
+    "agent": 12
+  },
+  "seed": 1337,
+  "baseline": {
+    "math": 40.54054054054054,
+    "grid": 0.0,
+    "sci": 0.0,
+    "agent": 0.0,
+    "sci_close": 0.0,
+    "MEAN": 10.135135135135135
+  },
+  "baseline_sc": {
+    "math": 40.54054054054054,
+    "grid": 0.0,
+    "sci": 0.0,
+    "agent": 0.0,
+    "sci_close": 0.0,
+    "MEAN": 10.135135135135135
+  },
+  "prism_v0": {
+    "math": 29.72972972972973,
+    "grid": 2.7027027027027026,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 8.108108108108109
+  },
+  "grid_heldout_v0": [
+    0.0,
+    14,
+    4.3478260869565215,
+    23
+  ],
+  "weight_updates": true,
+  "rounds_completed": 0,
+  "stop_reason": "finished the planned rounds",
+  "curve": [
+    {
+      "round": 0,
+      "math": 29.72972972972973,
+      "grid": 2.7027027027027026,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 8.108108108108109,
+      "skills": 0
+    }
+  ],
+  "frontier": null
+}

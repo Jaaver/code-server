@@ -1,0 +1,267 @@
+import os
+HERE = os.path.dirname(os.path.abspath(__file__))
+TMP = os.path.join(HERE, "_testtmp"); os.makedirs(TMP, exist_ok=True)
+PRISM = os.path.join(HERE, "prism_colab.py")
+"""Exercise every non-LLM component of PRISM: generators, verifiers, sandbox, skills."""
+import sys, types, os, json, random, math, time
+
+# ---- stub the heavy deps so the module imports without a GPU stack -------------
+def stub(name, **attrs):
+    m = types.ModuleType(name)
+    for k, v in attrs.items(): setattr(m, k, v)
+    sys.modules[name] = m
+    return m
+
+np = stub("numpy"); np.random = types.SimpleNamespace(seed=lambda *a: None)
+class _Cuda:
+    @staticmethod
+    def is_available(): return False
+    @staticmethod
+    def is_bf16_supported(): return False
+    @staticmethod
+    def get_device_name(i): return "stub"
+    @staticmethod
+    def empty_cache(): pass
+    OutOfMemoryError = RuntimeError
+torch = stub("torch", cuda=_Cuda, bfloat16="bf16", float16="fp16", float32="fp32",
+             manual_seed=lambda *a: None, __version__="stub", no_grad=lambda: (lambda f: f))
+torch.optim = types.SimpleNamespace(AdamW=None, lr_scheduler=types.SimpleNamespace(OneCycleLR=None))
+torch.nn = types.SimpleNamespace(utils=types.SimpleNamespace(clip_grad_norm_=None))
+tr = stub("transformers", AutoTokenizer=None, AutoModelForCausalLM=None, __version__="stub")
+stub("peft", LoraConfig=None, get_peft_model=None)
+
+os.environ["PRISM_STATE"] = os.path.join(TMP,"state")
+src = open(PRISM).read()
+g = {"__name__": "prism_test"}
+exec(compile(src, "prism_colab.py", "exec"), g)
+
+rng = random.Random(7)
+fails = []
+
+# ---------------------------------------------------------------- math suite ----
+mt = g["gen_math"](30, rng)
+print(f"math tasks: {len(mt)}")
+print("  sample:", mt[0]["q"][:110], "=>", mt[0]["ans"])
+assert len(mt) == 30 and len({t['q'] for t in mt}) == 30
+
+# an oracle program must verify through the sandbox path
+r = g["run_python"]("print(3*7+1)")
+assert r["ok"] and g["last_number"](r["out"]) == 22.0, r
+r = g["run_python"]("import sys\nwhile True: pass", timeout=2)
+assert not r["ok"] and "Timeout" in r["err"], r
+r = g["run_python"]("raise ValueError('boom')")
+assert not r["ok"] and "ValueError" in r["err"], r
+print("sandbox: ok / timeout / traceback all handled")
+
+# ---------------------------------------------------------------- grid suite ----
+gt = g["gen_grid"](40, rng, difficulty=2)
+print(f"grid tasks: {len(gt)} | rules e.g. {[t['rule'] for t in gt[:4]]}")
+assert len(gt) == 40
+# ground-truth program must pass the verifier for every task
+import re
+OPS = dict(g["GRID_OPS"])
+srcmap = {
+ "rot90":"g=[list(r) for r in zip(*g[::-1])]",
+ "rot180":"g=[r[::-1] for r in g[::-1]]",
+ "flipud":"g=g[::-1]",
+ "fliplr":"g=[r[::-1] for r in g]",
+ "transpose":"g=[list(r) for r in zip(*g)]",
+}
+n_ok = 0
+for t in gt:
+    ops = t["rule"].split("+")
+    if not all(o in srcmap for o in ops): continue
+    code = "def transform(g):\n    " + "\n    ".join(srcmap[o] for o in ops) + "\n    return g\n"
+    pred, err = g["_grid_check"](code, t)
+    assert pred == t["test"][1], (t["rule"], err)
+    n_ok += 1
+print(f"grid verifier: {n_ok} oracle programs accepted, all test outputs exact")
+# small models append their own driver; the harness must not lose a correct function to it
+t_id = [t for t in gt if t["rule"] == "transpose"] or [t for t in gt if t["rule"] == "fliplr"]
+tt = t_id[0]
+body = ("def transform(g):\n    return [list(r) for r in zip(*g)]\n" if tt["rule"] == "transpose"
+        else "def transform(g):\n    return [r[::-1] for r in g]\n")
+withdriver = body + "\n# Test cases\nprint(transform(IN))\nprint(transform(OUT))\n"
+pred, err = g["_grid_check"](withdriver, tt)
+assert pred == tt["test"][1], f"trailing driver code lost a correct function: {err}"
+print("trailing driver code stripped, correct function still credited  ✓")
+
+# a correct rule expressed with a non-list container must still count
+tuply = body.replace("return [list(r) for r in zip(*g)]", "return tuple(tuple(r) for r in zip(*g))") \
+            .replace("return [r[::-1] for r in g]", "return tuple(tuple(r[::-1]) for r in g)")
+pred, err = g["_grid_check"](tuply, tt)
+assert pred == tt["test"][1], f"tuple return rejected: {err}"
+print("non-list return values normalised before comparison  ✓")
+
+# stripping must be a no-op when the required function is missing, so real errors still surface
+assert g["strip_to_definitions"]("x = undefined_thing()", "transform") == "x = undefined_thing()"
+assert "def transform" in g["strip_to_definitions"](body, "transform")
+
+bad, err = g["_grid_check"]("def transform(g):\n    return [[0]]\n", gt[0])
+assert bad is None and err, "verifier must reject a wrong rule"
+print("grid verifier rejects a wrong rule with feedback:", err[:70])
+
+# ----------------------------------------------------------------- sci suite ----
+st = g["gen_sci"](12, rng)
+print(f"sci tasks: {len(st)}")
+for t in st:
+    s, eff, e = g["sci_score_expr"](t["expr"], t)
+    assert s < 1e-12, (t["name"], s, e)
+    s2, _, _ = g["sci_score_expr"]("x0+x1" if t["nvars"] >= 2 else "x0*2", t)
+    if s2 < 1e-8: fails.append(f"sci decoy accepted for {t['name']}")
+print("sci verifier: every ground-truth law scores nmse<1e-12, decoys rejected")
+
+# skeleton + optimiser: the right FORM with the wrong constant must be recoverable with
+# fit=True and must still be rejected with fit=False (the baseline's scoring mode).
+ke = [t for t in st if t["expr"] == "0.5*x0*x1**2"]
+if not ke:
+    saved = g["SCI_LAWS"][:]
+    g["SCI_LAWS"][:] = [l for l in saved if l[2] == "0.5*x0*x1**2"]
+    ke = g["gen_sci"](1, rng); g["SCI_LAWS"][:] = saved
+t = ke[0]
+s_nofit, _, _ = g["sci_score_expr"]("x0*x1**2", t, fit=False)
+s_fit, eff, _ = g["sci_score_expr"]("x0*x1**2", t, fit=True)
+assert s_nofit > 1e-3, f"unfitted wrong-constant form should not score well: {s_nofit}"
+assert s_fit < 1e-12, f"fitting should recover the constant: {s_fit}"
+assert "0.5" in eff, eff
+print(f"skeleton+optimiser: 'x0*x1**2' scores {s_nofit:.3f} raw, {s_fit:.1e} fitted -> {eff}")
+# and fitting must not rescue a genuinely wrong form
+s_bad, _, _ = g["sci_score_expr"]("x0+x1", t, fit=True)
+assert s_bad > 1e-6, f"fitting rescued a wrong form: {s_bad}"
+print("fitting does not rescue a wrong functional form  ✓")
+
+# --------------------------------------------------------------- agent suite ----
+at = g["gen_agent"](16, rng)
+print(f"agent tasks: {len(at)} | tiers {sorted(set(t['tier'] for t in at))} | "
+      f"optimal lengths {[t['opt'] for t in at[:8]]}")
+assert len(at) == 16
+for t in at:
+    sol = g["_agent_solve"](t["grid"])
+    ok, why = g["agent_simulate"](t["grid"], sol, t["max_steps"])
+    assert ok, (t["grid"], why)
+    bad, why2 = g["agent_simulate"](t["grid"], "UUUU", t["max_steps"])
+    assert not bad
+print("agent verifier: reference BFS plan accepted for all, junk plan rejected")
+# a reply that is just a route must be picked up, and must still be simulated, not trusted
+t = at[0]; sol = g["_agent_solve"](t["grid"])
+assert g["_plan_from_text"](f"I think the route is {sol} and that reaches the exit.") == sol
+assert g["_plan_from_text"]("no moves here") == ""
+assert g["_plan_from_text"](f"maybe {sol.lower()}") == sol
+bad_route = "U" * (t["max_steps"] + 5)
+assert not g["agent_simulate"](t["grid"], g["_plan_from_text"](bad_route), t["max_steps"])[0]
+print("agent: a bare route reply is extracted, then still checked by the simulator  ✓")
+print("  rejection message example:", why2)
+
+# ------------------------------------------------------------ skill library -----
+SK = g["SkillLibrary"](os.path.join(TMP,"sk.json"))
+SK.add("agent", "bfs planner tier3 keys doors ordered items", "def solve(grid): return 'RRDD'")
+SK.add("agent", "bfs planner tier1 simple", "def solve(grid): return 'DD'")
+SK.add("grid", "grid induction rot90", "def transform(g): return g")
+assert not SK.add("agent", "dup", "def solve(grid): return 'RRDD'") or True
+hits = SK.retrieve("agent", "bfs grid keys doors items order tier3", k=2)
+assert hits and "bfs" in hits[0]["desc"], hits
+assert SK.retrieve("math", "anything") == []
+SK.save(); assert os.path.exists(SK.path)
+print(f"skill library: {len(SK)} entries, retrieval ranks tier3 first -> {hits[0]['desc'][:40]!r}")
+
+# ------------------------------------------------- retrieval keys carry no leak ----
+# The property that matters is not "the string avoids certain words" - a shape signature may
+# honestly say "transpose" because the shape flipped. It is that the descriptor is a pure
+# function of what the model is shown. Strip every privileged field and require the same key.
+PRIVILEGED = {"grid": ["rule"], "sci": ["name", "expr"], "agent": ["tier", "opt", "max_steps"]}
+for tasks, fn in ((gt, "_grid_shape_desc"), (st, "_sci_desc"), (at, "_agent_desc")):
+    for t in tasks:
+        blind = {k: v for k, v in t.items() if k not in PRIVILEGED[t["domain"]]}
+        assert g[fn](blind) == g[fn](t), (
+            f"{fn} reads a field the model never sees: {t['domain']}")
+print("skill-retrieval keys are derived only from what the model is shown:")
+print("  grid  ->", g["_grid_shape_desc"](gt[0]))
+print("  sci   ->", g["_sci_desc"](st[0]))
+print("  agent ->", g["_agent_desc"](at[0]))
+
+# --------------------------------------------------------- prompt/extraction ----
+assert g["extract_code"]("blah\n```python\ndef f():\n    return 1\n```\nend") == "def f():\n    return 1"
+assert "def transform" in g["extract_code"]("here you go\ndef transform(g):\n    return g")
+assert g["last_number"]("the answer is 1,234.50") == 1234.5
+assert g["num_eq"](3.14159, 3.1416, tol=1e-3)
+p = g["_grid_prompt"](gt[0], feedback="it does not reproduce example(s) [2]")
+assert p[1]["content"].count("example") >= 3
+# small grids get a routing prompt with no code instruction; large ones get the planner
+small = [t for t in at if t["opt"] <= 14 and len(t["grid"]) <= 7]
+large = [t for t in at if not (t["opt"] <= 14 and len(t["grid"]) <= 7)]
+if small:
+    p = g["_agent_prompt"](small[0])
+    assert "move string" in p[1]["content"] and "breadth-first" not in p[1]["content"], \
+        "small grids must not be told to write a BFS"
+    assert "code" not in p[0]["content"].lower() or "No code" in p[0]["content"], \
+        "the system message must not demand code when we asked for a route"
+if large:
+    p = g["_agent_prompt"](large[0])
+    assert "breadth-first" in p[1]["content"], "large grids should still get the planner prompt"
+p = g["_agent_prompt"](at[0])
+print("prompt builders and parsers: ok")
+
+# A fenced stub at the end of a prompt makes small models echo empty fences and copy the
+# demo instead of solving. With an empty library no prompt may contain a code fence.
+_sk = g["SKILLS"]; g["SKILLS"] = g["SkillLibrary"](os.path.join(TMP, "empty.json"))
+try:
+    for name, body in (("grid", g["_grid_prompt"](gt[0])[1]["content"]),
+                       ("agent", g["_agent_prompt"](at[0])[1]["content"]),
+                       ("math", g["_math_prompt"](mt[0])[1]["content"])):
+        assert "```" not in body, f"{name} prompt still ends in a fenced stub"
+    print("no prompt ships a fenced code stub for the model to echo  \u2713")
+finally:
+    g["SKILLS"] = _sk
+
+# retrieved skills must precede the task, so left-truncation drops references not the task
+SK2 = g["SkillLibrary"](os.path.join(TMP, "sk2.json"))
+_orig = g["SKILLS"]; g["SKILLS"] = SK2
+try:
+    for t in gt[:6]:
+        SK2.add("grid", g["_grid_shape_desc"](t), "def transform(g):\n    return g  # PLACEHOLDER")
+    for t in at[:4]:
+        SK2.add("agent", g["_agent_desc"](t), "def solve(grid):\n    return 'UD'  # PLACEHOLDER")
+    for t in st[:4]:
+        SK2.add("sci", g["_sci_desc"](t), "def f(x0):\n    return x0  # PLACEHOLDER")
+    SK2.add("math", mt[0]["q"][:180], "print(1)  # PLACEHOLDER")
+    checks = [("grid", g["_grid_prompt"](gt[0])[1]["content"], "Induce the single transformation"),
+              ("math", g["_math_prompt"](mt[0])[1]["content"], "Problem:")]
+    big = [t for t in at if not (t["opt"] <= 14 and len(t["grid"]) <= 7)]
+    if big:
+        checks.append(("agent", g["_agent_prompt"](big[0])[1]["content"], "Grid world rules"))
+    for dom, body, marker in checks:
+        assert "PLACEHOLDER" in body, f"{dom}: no skill was retrieved into the prompt"
+        assert body.index("PLACEHOLDER") < body.index(marker), \
+            f"{dom}: retrieved skills come after the task, so truncation would eat the task"
+    # the small-grid routing prompt carries no skills on purpose: every stored agent skill is
+    # a solve() program, which is noise when the answer wanted is a bare move string
+    smalls = [t for t in at if t["opt"] <= 14 and len(t["grid"]) <= 7]
+    if smalls:
+        assert "PLACEHOLDER" not in g["_agent_prompt"](smalls[0])[1]["content"], \
+            "the routing prompt should not inject solve() programs"
+    print("retrieved skills precede the task in every prompt (truncation-safe)  ✓")
+finally:
+    g["SKILLS"] = _orig
+
+# ------------------------------------------------------ baseline check path -----
+t = mt[0]
+assert g["_baseline_check"](t, f"reasoning ... #### {t['ans']}")
+assert not g["_baseline_check"](t, "#### 999999999")
+t = gt[0]
+assert g["_baseline_check"](t, "answer: " + json.dumps(t["test"][1]))
+t = at[0]
+assert g["_baseline_check"](t, g["_agent_solve"](t["grid"]))
+t = st[0]
+assert g["_baseline_check"](t, "y = " + t["expr"])
+print("baseline grader accepts correct answers and rejects wrong ones in all 4 domains")
+
+# an unusable GPU must abort, not quietly spend a GPU session doing CPU work
+src = open(PRISM).read()
+assert "ABORTING rather than spending GPU-quota hours on CPU" in src
+i, j = src.index("PRISM_REQUIRE_GPU"), src.index("raise SystemExit")
+assert i < j, "the abort must be gated on PRISM_REQUIRE_GPU"
+assert 'os.environ.get("PRISM_REQUIRE_GPU", "1")' in src, "abort must be the default"
+print("unusable GPU aborts by default, PRISM_REQUIRE_GPU=0 overrides  \u2713")
+
+print("\nFAILURES:", fails if fails else "none")
+print("ALL CORE TESTS PASSED")

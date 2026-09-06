@@ -1,0 +1,1740 @@
+{
+  "model": "Qwen/Qwen2.5-0.5B-Instruct",
+  "params": 494032768,
+  "preset": "tiny",
+  "device": "cuda",
+  "gpu": "Tesla T4",
+  "suite_sizes": {
+    "math": 10,
+    "grid": 8,
+    "sci": 3,
+    "agent": 8
+  },
+  "seed": 1337,
+  "baseline": {
+    "math": 40.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "agent": 0.0,
+    "sci_close": 0.0,
+    "MEAN": 10.0
+  },
+  "baseline_sc": {
+    "math": 50.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "agent": 0.0,
+    "sci_close": 0.0,
+    "MEAN": 12.5
+  },
+  "prism_v0": {
+    "math": 30.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 7.5
+  },
+  "grid_heldout_v0": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "weight_updates": true,
+  "grid_heldout_v1": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v1": {
+    "math": 30.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 7.5
+  },
+  "grid_heldout_v2": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v2": {
+    "math": 30.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 7.5
+  },
+  "grid_heldout_v3": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v3": {
+    "math": 60.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 15.0
+  },
+  "grid_heldout_v4": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v4": {
+    "math": 50.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 12.5
+  },
+  "grid_heldout_v5": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v5": {
+    "math": 60.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 15.0
+  },
+  "grid_heldout_v6": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v6": {
+    "math": 50.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 12.5
+  },
+  "grid_heldout_v7": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v7": {
+    "math": 50.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 12.5
+  },
+  "grid_heldout_v8": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v8": {
+    "math": 30.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 7.5
+  },
+  "grid_heldout_v9": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v9": {
+    "math": 60.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 15.0
+  },
+  "grid_heldout_v10": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v10": {
+    "math": 60.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 15.0
+  },
+  "grid_heldout_v11": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v11": {
+    "math": 70.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 17.5
+  },
+  "grid_heldout_v12": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v12": {
+    "math": 30.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 7.5
+  },
+  "grid_heldout_v13": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v13": {
+    "math": 30.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 7.5
+  },
+  "grid_heldout_v14": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v14": {
+    "math": 50.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 12.5
+  },
+  "grid_heldout_v15": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v15": {
+    "math": 40.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 10.0
+  },
+  "grid_heldout_v16": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v16": {
+    "math": 30.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 7.5
+  },
+  "grid_heldout_v17": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v17": {
+    "math": 30.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 7.5
+  },
+  "grid_heldout_v18": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v18": {
+    "math": 50.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 12.5
+  },
+  "grid_heldout_v19": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v19": {
+    "math": 40.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 10.0
+  },
+  "grid_heldout_v20": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v20": {
+    "math": 40.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 10.0
+  },
+  "grid_heldout_v21": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v21": {
+    "math": 40.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 10.0
+  },
+  "grid_heldout_v22": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v22": {
+    "math": 50.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 12.5
+  },
+  "grid_heldout_v23": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v23": {
+    "math": 40.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 10.0
+  },
+  "grid_heldout_v24": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v24": {
+    "math": 30.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 7.5
+  },
+  "grid_heldout_v25": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v25": {
+    "math": 50.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 12.5
+  },
+  "grid_heldout_v26": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v26": {
+    "math": 40.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 10.0
+  },
+  "grid_heldout_v27": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v27": {
+    "math": 40.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 10.0
+  },
+  "grid_heldout_v28": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v28": {
+    "math": 50.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 12.5
+  },
+  "grid_heldout_v29": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v29": {
+    "math": 30.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 7.5
+  },
+  "grid_heldout_v30": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v30": {
+    "math": 30.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 7.5
+  },
+  "grid_heldout_v31": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v31": {
+    "math": 40.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 10.0
+  },
+  "grid_heldout_v32": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v32": {
+    "math": 30.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 7.5
+  },
+  "grid_heldout_v33": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v33": {
+    "math": 50.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 12.5
+  },
+  "grid_heldout_v34": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v34": {
+    "math": 30.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 7.5
+  },
+  "grid_heldout_v35": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v35": {
+    "math": 50.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 12.5
+  },
+  "grid_heldout_v36": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v36": {
+    "math": 20.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 5.0
+  },
+  "grid_heldout_v37": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v37": {
+    "math": 30.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 7.5
+  },
+  "grid_heldout_v38": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v38": {
+    "math": 20.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 5.0
+  },
+  "grid_heldout_v39": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v39": {
+    "math": 20.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 5.0
+  },
+  "grid_heldout_v40": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v40": {
+    "math": 50.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 12.5
+  },
+  "grid_heldout_v41": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v41": {
+    "math": 40.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 10.0
+  },
+  "grid_heldout_v42": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v42": {
+    "math": 30.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 7.5
+  },
+  "grid_heldout_v43": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v43": {
+    "math": 40.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 10.0
+  },
+  "grid_heldout_v44": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v44": {
+    "math": 30.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 7.5
+  },
+  "grid_heldout_v45": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v45": {
+    "math": 20.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 5.0
+  },
+  "grid_heldout_v46": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v46": {
+    "math": 40.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 10.0
+  },
+  "grid_heldout_v47": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v47": {
+    "math": 40.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 10.0
+  },
+  "grid_heldout_v48": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v48": {
+    "math": 30.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 7.5
+  },
+  "grid_heldout_v49": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v49": {
+    "math": 20.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 5.0
+  },
+  "grid_heldout_v50": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v50": {
+    "math": 20.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 5.0
+  },
+  "grid_heldout_v51": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v51": {
+    "math": 20.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 5.0
+  },
+  "grid_heldout_v52": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v52": {
+    "math": 10.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 2.5
+  },
+  "grid_heldout_v53": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v53": {
+    "math": 30.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 7.5
+  },
+  "grid_heldout_v54": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v54": {
+    "math": 30.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 7.5
+  },
+  "grid_heldout_v55": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v55": {
+    "math": 10.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 2.5
+  },
+  "grid_heldout_v56": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v56": {
+    "math": 30.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 7.5
+  },
+  "grid_heldout_v57": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v57": {
+    "math": 40.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 10.0
+  },
+  "grid_heldout_v58": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v58": {
+    "math": 30.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 7.5
+  },
+  "grid_heldout_v59": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v59": {
+    "math": 20.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 5.0
+  },
+  "grid_heldout_v60": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v60": {
+    "math": 30.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 7.5
+  },
+  "grid_heldout_v61": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v61": {
+    "math": 20.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 5.0
+  },
+  "grid_heldout_v62": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v62": {
+    "math": 30.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 7.5
+  },
+  "grid_heldout_v63": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v63": {
+    "math": 30.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 7.5
+  },
+  "grid_heldout_v64": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v64": {
+    "math": 20.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 5.0
+  },
+  "grid_heldout_v65": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v65": {
+    "math": 10.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 2.5
+  },
+  "grid_heldout_v66": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v66": {
+    "math": 20.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 5.0
+  },
+  "grid_heldout_v67": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v67": {
+    "math": 10.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 2.5
+  },
+  "grid_heldout_v68": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v68": {
+    "math": 10.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 2.5
+  },
+  "grid_heldout_v69": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v69": {
+    "math": 10.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 2.5
+  },
+  "grid_heldout_v70": [
+    0.0,
+    3,
+    0.0,
+    5
+  ],
+  "prism_v70": {
+    "math": 30.0,
+    "grid": 0.0,
+    "sci": 0.0,
+    "sci_close": 0.0,
+    "agent": 0.0,
+    "MEAN": 7.5
+  },
+  "rounds_completed": 70,
+  "stop_reason": "5 min of budget left, less than the ~10 min a round needs \u2014 stopping here so the report gets written",
+  "curve": [
+    {
+      "round": 0,
+      "math": 30.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 7.5,
+      "skills": 0
+    },
+    {
+      "round": 1,
+      "math": 30.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 7.5,
+      "skills": 1
+    },
+    {
+      "round": 2,
+      "math": 30.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 7.5,
+      "skills": 2
+    },
+    {
+      "round": 3,
+      "math": 60.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 15.0,
+      "skills": 3
+    },
+    {
+      "round": 4,
+      "math": 50.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 12.5,
+      "skills": 4
+    },
+    {
+      "round": 5,
+      "math": 60.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 15.0,
+      "skills": 4
+    },
+    {
+      "round": 6,
+      "math": 50.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 12.5,
+      "skills": 5
+    },
+    {
+      "round": 7,
+      "math": 50.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 12.5,
+      "skills": 6
+    },
+    {
+      "round": 8,
+      "math": 30.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 7.5,
+      "skills": 7
+    },
+    {
+      "round": 9,
+      "math": 60.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 15.0,
+      "skills": 8
+    },
+    {
+      "round": 10,
+      "math": 60.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 15.0,
+      "skills": 10
+    },
+    {
+      "round": 11,
+      "math": 70.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 17.5,
+      "skills": 12
+    },
+    {
+      "round": 12,
+      "math": 30.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 7.5,
+      "skills": 13
+    },
+    {
+      "round": 13,
+      "math": 30.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 7.5,
+      "skills": 14
+    },
+    {
+      "round": 14,
+      "math": 50.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 12.5,
+      "skills": 15
+    },
+    {
+      "round": 15,
+      "math": 40.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 10.0,
+      "skills": 17
+    },
+    {
+      "round": 16,
+      "math": 30.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 7.5,
+      "skills": 18
+    },
+    {
+      "round": 17,
+      "math": 30.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 7.5,
+      "skills": 20
+    },
+    {
+      "round": 18,
+      "math": 50.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 12.5,
+      "skills": 24
+    },
+    {
+      "round": 19,
+      "math": 40.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 10.0,
+      "skills": 25
+    },
+    {
+      "round": 20,
+      "math": 40.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 10.0,
+      "skills": 27
+    },
+    {
+      "round": 21,
+      "math": 40.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 10.0,
+      "skills": 29
+    },
+    {
+      "round": 22,
+      "math": 50.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 12.5,
+      "skills": 30
+    },
+    {
+      "round": 23,
+      "math": 40.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 10.0,
+      "skills": 32
+    },
+    {
+      "round": 24,
+      "math": 30.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 7.5,
+      "skills": 32
+    },
+    {
+      "round": 25,
+      "math": 50.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 12.5,
+      "skills": 35
+    },
+    {
+      "round": 26,
+      "math": 40.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 10.0,
+      "skills": 37
+    },
+    {
+      "round": 27,
+      "math": 40.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 10.0,
+      "skills": 37
+    },
+    {
+      "round": 28,
+      "math": 50.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 12.5,
+      "skills": 38
+    },
+    {
+      "round": 29,
+      "math": 30.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 7.5,
+      "skills": 39
+    },
+    {
+      "round": 30,
+      "math": 30.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 7.5,
+      "skills": 40
+    },
+    {
+      "round": 31,
+      "math": 40.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 10.0,
+      "skills": 41
+    },
+    {
+      "round": 32,
+      "math": 30.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 7.5,
+      "skills": 44
+    },
+    {
+      "round": 33,
+      "math": 50.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 12.5,
+      "skills": 45
+    },
+    {
+      "round": 34,
+      "math": 30.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 7.5,
+      "skills": 46
+    },
+    {
+      "round": 35,
+      "math": 50.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 12.5,
+      "skills": 48
+    },
+    {
+      "round": 36,
+      "math": 20.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 5.0,
+      "skills": 50
+    },
+    {
+      "round": 37,
+      "math": 30.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 7.5,
+      "skills": 52
+    },
+    {
+      "round": 38,
+      "math": 20.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 5.0,
+      "skills": 52
+    },
+    {
+      "round": 39,
+      "math": 20.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 5.0,
+      "skills": 54
+    },
+    {
+      "round": 40,
+      "math": 50.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 12.5,
+      "skills": 55
+    },
+    {
+      "round": 41,
+      "math": 40.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 10.0,
+      "skills": 55
+    },
+    {
+      "round": 42,
+      "math": 30.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 7.5,
+      "skills": 55
+    },
+    {
+      "round": 43,
+      "math": 40.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 10.0,
+      "skills": 55
+    },
+    {
+      "round": 44,
+      "math": 30.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 7.5,
+      "skills": 55
+    },
+    {
+      "round": 45,
+      "math": 20.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 5.0,
+      "skills": 57
+    },
+    {
+      "round": 46,
+      "math": 40.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 10.0,
+      "skills": 58
+    },
+    {
+      "round": 47,
+      "math": 40.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 10.0,
+      "skills": 59
+    },
+    {
+      "round": 48,
+      "math": 30.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 7.5,
+      "skills": 60
+    },
+    {
+      "round": 49,
+      "math": 20.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 5.0,
+      "skills": 62
+    },
+    {
+      "round": 50,
+      "math": 20.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 5.0,
+      "skills": 66
+    },
+    {
+      "round": 51,
+      "math": 20.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 5.0,
+      "skills": 67
+    },
+    {
+      "round": 52,
+      "math": 10.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 2.5,
+      "skills": 69
+    },
+    {
+      "round": 53,
+      "math": 30.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 7.5,
+      "skills": 70
+    },
+    {
+      "round": 54,
+      "math": 30.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 7.5,
+      "skills": 70
+    },
+    {
+      "round": 55,
+      "math": 10.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 2.5,
+      "skills": 70
+    },
+    {
+      "round": 56,
+      "math": 30.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 7.5,
+      "skills": 71
+    },
+    {
+      "round": 57,
+      "math": 40.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 10.0,
+      "skills": 74
+    },
+    {
+      "round": 58,
+      "math": 30.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 7.5,
+      "skills": 77
+    },
+    {
+      "round": 59,
+      "math": 20.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 5.0,
+      "skills": 78
+    },
+    {
+      "round": 60,
+      "math": 30.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 7.5,
+      "skills": 78
+    },
+    {
+      "round": 61,
+      "math": 20.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 5.0,
+      "skills": 79
+    },
+    {
+      "round": 62,
+      "math": 30.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 7.5,
+      "skills": 80
+    },
+    {
+      "round": 63,
+      "math": 30.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 7.5,
+      "skills": 82
+    },
+    {
+      "round": 64,
+      "math": 20.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 5.0,
+      "skills": 84
+    },
+    {
+      "round": 65,
+      "math": 10.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 2.5,
+      "skills": 84
+    },
+    {
+      "round": 66,
+      "math": 20.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 5.0,
+      "skills": 85
+    },
+    {
+      "round": 67,
+      "math": 10.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 2.5,
+      "skills": 86
+    },
+    {
+      "round": 68,
+      "math": 10.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 2.5,
+      "skills": 86
+    },
+    {
+      "round": 69,
+      "math": 10.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 2.5,
+      "skills": 86
+    },
+    {
+      "round": 70,
+      "math": 30.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 7.5,
+      "skills": 86
+    }
+  ],
+  "frontier": null
+}

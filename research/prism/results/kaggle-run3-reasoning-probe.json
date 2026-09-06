@@ -1,0 +1,44 @@
+{
+  "no reasoning, 400 tok  (control)": {
+    "grid": {
+      "finished": 100.0,
+      "parsed": 84.375,
+      "solved": 0.0,
+      "secs": 385.12085819244385
+    },
+    "agent": {
+      "finished": 100.0,
+      "parsed": 100.0,
+      "solved": 0.0,
+      "secs": 909.1868841648102
+    }
+  },
+  "reasoning, 800 tok": {
+    "grid": {
+      "finished": 3.125,
+      "parsed": 3.125,
+      "solved": 0.0,
+      "secs": 4102.767682313919
+    },
+    "agent": {
+      "finished": 0.0,
+      "parsed": 0.0,
+      "solved": 0.0,
+      "secs": 1941.6260268688202
+    }
+  },
+  "reasoning, 1600 tok": {
+    "grid": {
+      "finished": 18.75,
+      "parsed": 18.75,
+      "solved": 0.0,
+      "secs": 11581.6429438591
+    },
+    "agent": {
+      "finished": 0.0,
+      "parsed": 0.0,
+      "solved": 0.0,
+      "secs": 4704.662159204483
+    }
+  }
+}

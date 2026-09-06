@@ -1,0 +1,93 @@
+{
+  "round": 70,
+  "skills": 86,
+  "best_mean": 17.5,
+  "elapsed_min": 475.1,
+  "budget_left_min": 4.9,
+  "mean_round_min": 6.7,
+  "traces": 133,
+  "curve": [
+    {
+      "round": 63,
+      "math": 30.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 7.5,
+      "skills": 82
+    },
+    {
+      "round": 64,
+      "math": 20.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 5.0,
+      "skills": 84
+    },
+    {
+      "round": 65,
+      "math": 10.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 2.5,
+      "skills": 84
+    },
+    {
+      "round": 66,
+      "math": 20.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 5.0,
+      "skills": 85
+    },
+    {
+      "round": 67,
+      "math": 10.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 2.5,
+      "skills": 86
+    },
+    {
+      "round": 68,
+      "math": 10.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 2.5,
+      "skills": 86
+    },
+    {
+      "round": 69,
+      "math": 10.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 2.5,
+      "skills": 86
+    },
+    {
+      "round": 70,
+      "math": 30.0,
+      "grid": 0.0,
+      "sci": 0.0,
+      "sci_close": 0.0,
+      "agent": 0.0,
+      "MEAN": 7.5,
+      "skills": 86
+    }
+  ],
+  "running": false,
+  "stop_reason": "5 min of budget left, less than the ~10 min a round needs \u2014 stopping here so the report gets written"
+}

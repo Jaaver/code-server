@@ -1,0 +1,5 @@
+_testtmp/
+prism_state/
+smoke*.log
+kaggle/prism_run.py
+kaggle/*.log

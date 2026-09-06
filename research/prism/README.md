@@ -179,8 +179,15 @@ PRISM v0 (search+verify)               30.0    0.0    0.0    0.0     7.5
 * **The scaffold lost.** On the only suite that scored at all, PRISM came in below both
   controls. On a 10-item suite those are 3, 4 and 5 problems — the difference is noise, but
   there is certainly no evidence of the gain the design predicts.
-* **grid, sci and agent scored 0.0 in all 71 evaluations.** Across 8 hours of self-generated
-  curriculum the model solved 0/280 planning tasks, 23/350 grid, 28/350 laws, 84/350 math.
+* **grid, sci and agent read 0.0 in all 71 evaluations — but that reading was mostly an
+  artefact.** The curriculum measured the same solvers over far more tasks, and the true rates
+  are not zero: grid 23/350 = 6.6%, sci 28/350 = 8.0%, math 84/350 = 24.0%. An 8-item suite
+  facing a 6.6% solver returns exactly zero **58% of the time**, and a 3-item sci suite returns
+  zero 78% of the time. The suites were too small to distinguish "cannot" from "rarely".
+  Only **agent is genuinely zero**: 0 of 280, which is a real ceiling.
+
+  Resolving these rates to ±3 points needs roughly 263 grid items, 315 sci and 779 math. The
+  `measure` preset exists for that; `tiny` cannot answer the question it appears to answer.
 * **Self-evolution ran backwards.** Math averaged 42.0 over the first 35 rounds and 26.1 over
   the last 35. The cause is visible in the logs: LoRA training loss hit 0.000 on the second
   update and stayed under 0.01 for 59 of 67 updates. The adapter memorised its 133 verified

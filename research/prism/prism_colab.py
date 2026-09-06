@@ -69,6 +69,13 @@ PRESETS = {
     "tiny":     dict(time_budget=1500, n_math=10, n_grid=8,  n_sci=3,  n_agent=8,
                      k_math=6, k_grid=8, k_sci=8, k_agent=6, sci_rounds=2,
                      evo_rounds=1, evo_tasks=20, sft_steps=40, eval_every=1),
+    # Sized so the headline comparison is actually powered. The 8-hour run measured true
+    # solve rates of 24% math, 6.6% grid, 8% sci, 0% agent; an 8-item suite reads 6.6% as
+    # "0.0" 58% of the time, which is what happened. No evolution rounds: this preset exists
+    # to measure the baseline-vs-scaffold difference, not to train.
+    "measure":  dict(time_budget=25000, n_math=150, n_grid=150, n_sci=24, n_agent=60,
+                     k_math=6, k_grid=8, k_sci=8, k_agent=6, sci_rounds=3,
+                     evo_rounds=0, evo_tasks=0, sft_steps=0, eval_every=1),
     "quick":    dict(time_budget=4200, n_math=20, n_grid=14, n_sci=5,  n_agent=12,
                      k_math=6, k_grid=8, k_sci=8, k_agent=6, sci_rounds=3,
                      evo_rounds=2, evo_tasks=48, sft_steps=90, eval_every=1),
@@ -230,7 +237,11 @@ if not HAS_CUDA:
     # k may shrink but never below 4: at k=2 the vote has nothing to weigh and the whole
     # search-and-verify story degenerates into a single sample with extra steps
     for k in ("k_math","k_grid","k_sci","k_agent"): CFG[k] = max(4, CFG[k] // 2)
-    CFG["evo_rounds"], CFG["evo_tasks"], CFG["sft_steps"] = 1, 16, 30
+    # shrink, never inflate: the measure preset sets evo_rounds=0 deliberately and the CPU
+    # path must not turn that back on
+    CFG["evo_rounds"] = min(1, CFG["evo_rounds"])
+    CFG["evo_tasks"] = min(16, CFG["evo_tasks"]) if CFG["evo_tasks"] else 0
+    CFG["sft_steps"] = min(30, CFG["sft_steps"]) if CFG["sft_steps"] else 0
 
 # ------------------------------------------------------------------- code sandbox ---
 SANDBOX = os.path.join(STATE_DIR, "sandbox"); os.makedirs(SANDBOX, exist_ok=True)
@@ -805,6 +816,20 @@ SCI_LAWS = [
     ("doppler shift",         2, "x0*(1+x1)",                   (1, 9),   (0.05, 0.8)),
     ("coulomb potential",     3, "x0*x1/x2",                    (1, 6),   (1, 6)),
     ("logistic growth rate",  2, "x0*x1*(1-x1)",                (0.5, 4), (0.05, 0.95)),
+    # A 12-law table caps the sci suite at 12 items, which cannot resolve a single-digit
+    # solve rate. These extend it so the suite can actually be measured.
+    ("hookes energy",         2, "0.5*x0*x1**2",                (1, 6),   (0.2, 3)),
+    ("ohmic power",           2, "x0*x1**2",                    (1, 8),   (0.5, 4)),
+    ("centripetal force",     3, "x0*x1**2/x2",                 (1, 6),   (1, 5)),
+    ("ideal gas pressure",    3, "x0*x1/x2",                     (1, 5),   (1, 6)),
+    ("stefan boltzmann",      1, "x0**4",                       (1, 4),   (1, 4)),
+    ("capacitor energy",      2, "0.5*x0*x1**2",                (0.5, 5), (1, 6)),
+    ("rc decay",              2, "x0*math.exp(-x1/2.0)",        (1, 7),   (0.1, 5)),
+    ("beat frequency",        2, "x0*math.cos(x1)",             (1, 6),   (0.1, 6)),
+    ("escape velocity",       2, "math.sqrt(x0/x1)",            (1, 9),   (1, 6)),
+    ("parallel capacitance",  2, "x0+x1",                       (1, 9),   (1, 9)),
+    ("snell ratio",           2, "x0*math.sin(x1)/1.5",         (1, 5),   (0.1, 1.4)),
+    ("drag force",            2, "x0*x1**2/2",                  (0.5, 4), (0.5, 5)),
 ]
 
 def gen_sci(n, rng, n_rows=140):

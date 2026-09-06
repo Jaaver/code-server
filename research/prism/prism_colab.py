@@ -1419,14 +1419,34 @@ def _plan_from_text(txt):
         if len(m.group(0)) > len(best): best = m.group(0)
     return best.upper()
 
+ROUTER_SYS = ("You are a careful navigator. You answer with a single line containing only the "
+              "letters U, D, L and R. No code, no explanation.")
+
 def _agent_prompt(t, feedback=None):
+    """Ask for a route on small grids and a planner on large ones.
+
+    Measured: on 5x5 grids with 4-move solutions, the BFS-first wording made a 0.5B model
+    attempt a graph search every single time and fail on Python syntax every single time,
+    while SYS_SOLVER simultaneously ordered it to answer with code and nothing else -
+    contradicting the 'or just give the route' option the same prompt offered. Splitting the
+    two took the share of samples that produced a parseable route from 52% to 100%.
+
+    It did NOT change the score: still 0/8, because this model cannot trace the path either.
+    The split is kept because handing the verifier well-formed candidates is strictly better
+    and costs nothing, not because it rescued the suite."""
+    small = t["opt"] <= 14 and len(t["grid"]) <= 7
+    if small:
+        u = (AGENT_SPEC + "\nGrid (row 0 is the top line):\n" + "\n".join(t["grid"]) +
+             "\n\nWalk the route yourself, one square at a time, starting from S.\n"
+             "Answer with ONLY the move string, for example RRDDL. Nothing else.")
+        if feedback:
+            u += "\n\nYour previous route failed: " + feedback + "\nGive a corrected route."
+        return [{"role": "system", "content": ROUTER_SYS}, {"role": "user", "content": u}]
     u = (_skill_block("agent", _agent_desc(t)) + AGENT_SPEC + "\nGrid:\n" + "\n".join(t["grid"]) +
          "\n\nWrite one function named solve. It takes grid, a list of strings, and returns the "
          "action string, for example RRDDL. A breadth-first search over the state "
          "(row, col, keys_held, items_collected) is the reliable approach.\n"
-         "Do not call it and do not print - the harness calls solve(grid) itself.\n"
-         "If this grid is small enough to route by hand, replying with just the move string "
-         "such as RRDDLU is equally acceptable.")
+         "Do not call it and do not print - the harness calls solve(grid) itself.")
     if feedback:
         u += "\n\nYour previous plan was rejected: " + feedback + "\nReturn a corrected full function."
     return [{"role": "system", "content": SYS_SOLVER}, {"role": "user", "content": u}]

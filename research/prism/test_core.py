@@ -186,8 +186,19 @@ assert g["last_number"]("the answer is 1,234.50") == 1234.5
 assert g["num_eq"](3.14159, 3.1416, tol=1e-3)
 p = g["_grid_prompt"](gt[0], feedback="it does not reproduce example(s) [2]")
 assert p[1]["content"].count("example") >= 3
+# small grids get a routing prompt with no code instruction; large ones get the planner
+small = [t for t in at if t["opt"] <= 14 and len(t["grid"]) <= 7]
+large = [t for t in at if not (t["opt"] <= 14 and len(t["grid"]) <= 7)]
+if small:
+    p = g["_agent_prompt"](small[0])
+    assert "move string" in p[1]["content"] and "breadth-first" not in p[1]["content"], \
+        "small grids must not be told to write a BFS"
+    assert "code" not in p[0]["content"].lower() or "No code" in p[0]["content"], \
+        "the system message must not demand code when we asked for a route"
+if large:
+    p = g["_agent_prompt"](large[0])
+    assert "breadth-first" in p[1]["content"], "large grids should still get the planner prompt"
 p = g["_agent_prompt"](at[0])
-assert "breadth-first" in p[1]["content"]
 print("prompt builders and parsers: ok")
 
 # A fenced stub at the end of a prompt makes small models echo empty fences and copy the

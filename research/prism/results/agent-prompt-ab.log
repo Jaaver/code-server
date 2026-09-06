@@ -1,0 +1,17 @@
+
+======================================================================================
+PHASE 0 — bootstrap
+======================================================================================
+[    5.7s] torch 2.14.0+cpu | transformers 5.16.1 | device=cpu (cpu) | dtype=float32 | preset=tiny
+[    5.7s] !! no GPU detected — shrinking workload (results will be weaker/slower)
+[    5.7s] loading Qwen/Qwen2.5-0.5B-Instruct ...
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+[   11.5s] loaded Qwen/Qwen2.5-0.5B-Instruct | 494.0M parameters (0.4940B) — under the 1B budget
+[   11.5s] reasoning mode: off (token budgets x1.0)
+tasks: [(1, 5), (1, 4), (1, 4), (1, 5), (1, 4), (1, 6), (1, 5), (1, 6)]
+
+current prompt (BFS-first, SYS_SOLVER demands code):
+  current _agent_prompt                  solved 0/8  (route emitted in 52% of samples, 937s)
+
+routing-first prompt, navigator system message:
+  route-only prompt                      solved 0/8  (route emitted in 100% of samples, 310s)

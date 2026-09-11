@@ -42,7 +42,7 @@ def build(args):
                           target_ann_vol=args.target_vol, max_gross=args.max_gross,
                           max_weight=args.max_weight)
     ds = P.build_dataset(ucfg, scfg, max_date=args.max_date, min_date=args.min_date,
-                         label=args.label)
+                         label=args.label, use_metrics=args.use_metrics)
     return ds, ucfg, scfg
 
 
@@ -71,16 +71,45 @@ def main() -> int:
     ap.add_argument("--leverages", default="1,2,4,6,8")
     ap.add_argument("--costs", default="base,conservative,optimistic,brutal")
     ap.add_argument("--save-scores", action="store_true")
+    ap.add_argument("--use-metrics", action="store_true",
+                    help="include open-interest / positioning features")
+    ap.add_argument("--factor-model", action="store_true",
+                    help="size and neutralise with a trailing PCA factor model")
+    ap.add_argument("--n-factors", type=int, default=5)
+    ap.add_argument("--smooth-halflife", type=float, default=0.0,
+                    help="EWMA halflife (in decision bars) applied to scores")
+    ap.add_argument("--horizons", default="",
+                    help="comma-separated extra label horizons to ensemble over")
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     t0 = time.time()
     ds, ucfg, scfg = build(args)
 
-    (score, folds) = P.run_walkforward(ds, scfg, train_stride=args.train_stride,
-                                       sample_halflife_days=args.halflife_days)
-    if isinstance(score, tuple):
-        score = score[0]
+    horizons = [int(h) for h in args.horizons.split(",") if h.strip()]
+    if horizons:
+        from tai.models.ensemble import cs_standardise
+        parts = []
+        for h in horizons:
+            sc_h = StrategyConfig(**{**vars(scfg), "label_horizon": h})
+            yw = ds.labels_for_horizon(h, args.label)
+            ds.labels["y"] = yw
+            (s_h, _folds) = P.run_walkforward(ds, sc_h, train_stride=args.train_stride,
+                                              sample_halflife_days=args.halflife_days)
+            if isinstance(s_h, tuple):
+                s_h = s_h[0]
+            log.info("horizon %d: %d OOS rows", h, len(s_h))
+            parts.append(cs_standardise(s_h))
+        common = parts[0].index
+        for p_ in parts[1:]:
+            common = common.intersection(p_.index)
+        score = cs_standardise(sum(p_.reindex(common) for p_ in parts) / len(parts))
+        folds = _folds
+    else:
+        (score, folds) = P.run_walkforward(ds, scfg, train_stride=args.train_stride,
+                                           sample_halflife_days=args.halflife_days)
+        if isinstance(score, tuple):
+            score = score[0]
     log.info("walk-forward done in %.1f min; %d OOS rows", (time.time() - t0) / 60, len(score))
 
     out_dir = RESULTS_DIR / args.tag
@@ -111,7 +140,10 @@ def main() -> int:
     curves = {}
     for cname in costs:
         for lev in levs:
-            res, cfg = P.backtest_scores(ds, score, scfg, cname, leverage=lev)
+            res, cfg = P.backtest_scores(ds, score, scfg, cname, leverage=lev,
+                                         factor_model=args.factor_model,
+                                         n_factors=args.n_factors,
+                                         smooth_halflife=args.smooth_halflife)
             res = P.trim_to_oos(res, score)
             s = M.summarise(res, ds.bars_per_day, n_trials=max(len(levs) * len(costs), 10))
             key = f"{cname}_lev{lev:g}"

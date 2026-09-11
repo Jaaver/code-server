@@ -23,6 +23,7 @@ import numpy as np
 import pandas as pd
 
 from ..config import CostModel
+from .risk import factor_portfolio_vol, neutralise
 
 log = logging.getLogger(__name__)
 EPS = 1e-12
@@ -125,6 +126,45 @@ def target_weights(score: np.ndarray, vol: np.ndarray, beta: np.ndarray, live: n
     return w
 
 
+def target_weights_factor(score: np.ndarray, idio_vol: np.ndarray, L: np.ndarray,
+                          live: np.ndarray, cfg: ExecConfig) -> np.ndarray:
+    """Factor-neutral, idiosyncratic-risk-scaled unit-gross weights.
+
+    With a factor model in hand the correct denominator is idiosyncratic rather
+    than total volatility, and the correct neutrality constraint is the whole
+    loading matrix rather than a single market beta.
+    """
+    s = np.where(live, np.nan_to_num(score, nan=0.0), 0.0)
+    if not live.any() or np.all(s == 0):
+        return np.zeros_like(s)
+    n = int(live.sum())
+    s = s - s[live].mean()
+    sd = s[live].std()
+    if sd > EPS:
+        s = s / sd
+    v = np.where(live & (idio_vol > 0), idio_vol, np.nan)
+    med = np.nanmedian(v) if np.isfinite(v).any() else 1.0
+    v = np.where(np.isfinite(v), v, med)
+    v = np.clip(v, 0.25 * med, 6.0 * med)
+    w = np.where(live, s / v, 0.0)
+    w = neutralise(w, L, live, cfg.dollar_neutral)
+    g = np.abs(w).sum()
+    if g <= EPS:
+        return np.zeros_like(w)
+    w = w / g
+    cap = max(cfg.max_weight, 2.0 / max(n, 1))
+    for _ in range(6):
+        w = np.clip(w, -cap, cap)
+        w = neutralise(w, L, live, cfg.dollar_neutral)
+        g = np.abs(w).sum()
+        if g <= EPS:
+            return np.zeros_like(w)
+        w = w / g
+        if np.abs(w).max() <= cap + 1e-9:
+            break
+    return w
+
+
 def _portfolio_vol(w: np.ndarray, vol_ann: np.ndarray, rho: float) -> float:
     """Ex-ante annualised vol under an equicorrelated model.
 
@@ -137,7 +177,8 @@ def _portfolio_vol(w: np.ndarray, vol_ann: np.ndarray, rho: float) -> float:
 
 def run_backtest(panel: dict[str, pd.DataFrame], scores: pd.DataFrame, mask: pd.DataFrame,
                  vol_ann: pd.DataFrame, beta: pd.DataFrame, cost: CostModel,
-                 cfg: ExecConfig, *, rho: float = 0.30) -> BacktestResult:
+                 cfg: ExecConfig, *, rho: float = 0.30,
+                 factor_model: tuple | None = None) -> BacktestResult:
     """Simulate the book.  ``scores`` is NaN at bars where no decision is made."""
     syms = list(mask.columns)
     idx = mask.index
@@ -173,6 +214,11 @@ def run_backtest(panel: dict[str, pd.DataFrame], scores: pd.DataFrame, mask: pd.
     ret_hist = np.zeros(T)
     unit_ret = np.zeros(T)
     scale_hist = np.ones(T)
+
+    fm_L = fm_fvar = fm_idio = fm_step = None
+    if factor_model is not None:
+        fm_L, fm_fvar, fm_idio, fm_step = factor_model
+        bars_year = cfg.bars_per_day * 365.0
 
     blown = False
     blow_t = None
@@ -224,7 +270,14 @@ def run_backtest(panel: dict[str, pd.DataFrame], scores: pd.DataFrame, mask: pd.
         have_score = t > 0 and np.isfinite(sc[t - 1]).any()
         if have_score and equity > 0:
             live = mk[t - 1] & valid_px & np.isfinite(sc[t - 1])
-            w_t = target_weights(sc[t - 1], vl[t - 1], bt[t - 1], live, cfg)
+            if fm_L is not None:
+                si = int(fm_step[t - 1])
+                L_t = fm_L[si]
+                idio_t = fm_idio[si] * np.sqrt(bars_year)
+                live = live & np.isfinite(idio_t) & (np.abs(L_t).sum(axis=1) > 0)
+                w_t = target_weights_factor(sc[t - 1], idio_t, L_t, live, cfg)
+            else:
+                w_t = target_weights(sc[t - 1], vl[t - 1], bt[t - 1], live, cfg)
 
             # volatility targeting from trailing realised strategy vol only
             if t > vol_win // 4:
@@ -234,7 +287,12 @@ def run_backtest(panel: dict[str, pd.DataFrame], scores: pd.DataFrame, mask: pd.
                 realised = float(np.std(rv) * ann) if rv.size > 20 else np.nan
             else:
                 realised = np.nan
-            ex_ante = _portfolio_vol(w_t, vl[t - 1], rho)
+            if fm_L is not None:
+                ex_ante = factor_portfolio_vol(w_t, fm_L[int(fm_step[t - 1])],
+                                               fm_fvar[int(fm_step[t - 1])],
+                                               fm_idio[int(fm_step[t - 1])], bars_year)
+            else:
+                ex_ante = _portfolio_vol(w_t, vl[t - 1], rho)
             base_vol = realised if np.isfinite(realised) and realised > 1e-4 else ex_ante
             if not np.isfinite(base_vol) or base_vol <= 1e-4:
                 vs = 1.0

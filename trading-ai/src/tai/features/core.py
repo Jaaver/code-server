@@ -65,7 +65,8 @@ def _winsor(df: pd.DataFrame, lo: float = 0.005, hi: float = 0.995) -> pd.DataFr
 # main builder
 # --------------------------------------------------------------------------- #
 def build_feature_panels(panel: dict[str, pd.DataFrame], mask: pd.DataFrame,
-                         bars_per_day: int = 24) -> tuple[dict[str, pd.DataFrame], dict]:
+                         bars_per_day: int = 24, metrics: dict | None = None
+                         ) -> tuple[dict[str, pd.DataFrame], dict]:
     """Compute every feature as a wide ``[time, symbol]`` panel.
 
     Returns ``(features, aux)`` where ``aux`` carries the trailing volatility and
@@ -232,6 +233,10 @@ def build_feature_panels(panel: dict[str, pd.DataFrame], mask: pd.DataFrame,
     for k in cs_src:
         F[f"cs_{k}"] = _cs_rank(F[k], mask)
 
+    if metrics:
+        F = add_metrics_features(F, metrics, panel, mask,
+                                 {"ret": ret, "vol_ref": vol_ref})
+
     aux = {
         "vol_ref": vol_ref,
         "vol_ann": (vol_ref * np.sqrt(d * 365)).astype("float32"),
@@ -257,3 +262,146 @@ def stack_features(F: dict[str, pd.DataFrame], mask: pd.DataFrame) -> pd.DataFra
     idx = pd.MultiIndex.from_arrays([ts_idx, sym_idx], names=["ts", "symbol"])
     out = pd.DataFrame(data, index=idx, columns=names)
     return out
+
+
+# --------------------------------------------------------------------------- #
+# chunked / streaming construction
+# --------------------------------------------------------------------------- #
+def build_features_chunked(panel: dict[str, pd.DataFrame], mask: pd.DataFrame,
+                           bars_per_day: int = 24, *, chunk: int = 4000,
+                           warmup: int = 2600, log_progress: bool = True,
+                           metrics: dict | None = None) -> tuple[pd.DataFrame, dict]:
+    """Long-format feature matrix built in overlapping time chunks.
+
+    Holding ~110 wide panels for a 6-year, 500-symbol history costs more memory
+    than the machine has.  Chunking bounds peak memory at roughly
+    ``n_features * n_symbols * (chunk + warmup)`` floats while producing values
+    identical to the unchunked build, provided ``warmup`` covers the longest
+    rolling window in :func:`build_feature_panels` (the longest chain is a 720-bar
+    statistic z-scored over 720 bars, so ~1500 bars; 2600 leaves a wide margin).
+    ``tests/test_chunking.py`` asserts the equivalence.
+    """
+    n = len(mask)
+    parts: list[pd.DataFrame] = []
+    aux_parts: dict[str, list] = {"vol_ann": [], "beta": [], "vol_ref": []}
+    starts = list(range(0, n, chunk))
+    for ci, i0 in enumerate(starts):
+        i1 = min(i0 + chunk, n)
+        lo = max(0, i0 - warmup)
+        sub = {k: v.iloc[lo:i1] for k, v in panel.items()}
+        sub_mask = mask.iloc[lo:i1]
+        sub_met = ({k: v.iloc[lo:i1] for k, v in metrics.items()} if metrics else None)
+        F, aux = build_feature_panels(sub, sub_mask, bars_per_day, metrics=sub_met)
+        head = i0 - lo
+        keep_mask = sub_mask.iloc[head:]
+        F = {k: v.iloc[head:] for k, v in F.items()}
+        parts.append(stack_features(F, keep_mask))
+        for key in aux_parts:
+            aux_parts[key].append(aux[key].iloc[head:])
+        del F, aux, sub, sub_mask, sub_met
+        if log_progress:
+            log.info("features chunk %d/%d (%s..%s) rows=%d", ci + 1, len(starts),
+                     mask.index[i0].date(), mask.index[i1 - 1].date(), len(parts[-1]))
+    X = pd.concat(parts)
+    del parts
+    aux = {k: pd.concat(v) for k, v in aux_parts.items()}
+    return X, aux
+
+
+def aux_panels(panel: dict[str, pd.DataFrame], mask: pd.DataFrame,
+               bars_per_day: int = 24) -> dict[str, pd.DataFrame]:
+    """Just the trailing volatility and beta estimates used for sizing and labels.
+
+    Computed with exactly the same definitions as :func:`build_feature_panels`, so
+    evaluation code can rebuild sizing inputs cheaply without the full matrix.
+    """
+    c = panel["close"]
+    d = bars_per_day
+    ret = np.log(c / c.shift(1)).replace([np.inf, -np.inf], np.nan).astype("float32")
+    vol_med = _ewm_vol(ret, 72)
+    vol_ref = vol_med.where(vol_med > 0).ffill(limit=6)
+    mkt = ret.where(mask).median(axis=1).astype("float32")
+    bw = 24 * 30
+    cov = ret.mul(mkt, axis=0).rolling(bw, min_periods=bw // 3).mean() - \
+        ret.rolling(bw, min_periods=bw // 3).mean().mul(
+            mkt.rolling(bw, min_periods=bw // 3).mean(), axis=0)
+    var_m = mkt.rolling(bw, min_periods=bw // 3).var()
+    beta = cov.div(var_m + EPS, axis=0).clip(-3, 4).astype("float32")
+    return {"vol_ref": vol_ref, "vol_ann": (vol_ref * np.sqrt(d * 365)).astype("float32"),
+            "beta": beta, "mkt_ret": mkt, "ret": ret}
+
+
+# --------------------------------------------------------------------------- #
+# open-interest / positioning features (optional; requires the metrics archive)
+# --------------------------------------------------------------------------- #
+def add_metrics_features(F: dict[str, pd.DataFrame], metrics: dict[str, pd.DataFrame],
+                         panel: dict[str, pd.DataFrame], mask: pd.DataFrame,
+                         aux: dict) -> dict[str, pd.DataFrame]:
+    """Derive positioning features from the exchange's open-interest snapshots.
+
+    Open interest tells you whether a move was driven by new leveraged positions
+    being opened or by existing ones being closed, which price and volume cannot
+    distinguish.  The long/short ratios separate the crowd from the large accounts.
+    All values are snapshot-at-or-before-bar-close, so the transforms below are
+    trailing by construction.
+    """
+    if not metrics:
+        return F
+    cols = mask.columns
+    idx = mask.index
+    ret = aux["ret"]
+    vol_ref = aux["vol_ref"]
+
+    def al(df):
+        return df.reindex(index=idx, columns=cols).astype("float32")
+
+    oi = al(metrics.get("sum_open_interest", pd.DataFrame()))
+    oiv = al(metrics.get("sum_open_interest_value", pd.DataFrame()))
+    qv = panel["quote_volume"].reindex(index=idx, columns=cols).astype("float32")
+
+    if not oi.dropna(how="all").empty:
+        loi = np.log(oi.where(oi > 0))
+        for k in (1, 4, 12, 24, 72, 168):
+            d = (loi - loi.shift(k)).astype("float32")
+            F[f"oi_chg_{k}"] = (d / (vol_ref * np.sqrt(k) + EPS)).clip(-15, 15).astype("float32")
+        F["oi_chg_z"] = _zs(loi.diff(24), 24 * 30)
+        # positioning direction: OI rising with price = new longs, a crowding signal
+        r24 = np.log(panel["close"] / panel["close"].shift(24)).reindex(
+            index=idx, columns=cols).astype("float32")
+        F["oi_x_ret_24"] = (F["oi_chg_24"] * np.sign(r24)).clip(-15, 15).astype("float32")
+        F["oi_x_ret_4"] = (F["oi_chg_4"] * np.sign(
+            np.log(panel["close"] / panel["close"].shift(4)).reindex(
+                index=idx, columns=cols))).clip(-15, 15).astype("float32")
+
+    if not oiv.dropna(how="all").empty:
+        # leverage intensity: open interest relative to the flow that has to unwind it
+        ratio = (oiv / (qv.rolling(24, min_periods=8).mean() * 24 + EPS)).astype("float32")
+        F["oi_over_adv"] = np.log1p(ratio.clip(0, 500)).astype("float32")
+        F["oi_over_adv_z"] = _zs(F["oi_over_adv"], 24 * 30)
+
+    ls_retail = al(metrics.get("count_long_short_ratio", pd.DataFrame()))
+    ls_top_acct = al(metrics.get("count_toptrader_long_short_ratio", pd.DataFrame()))
+    ls_top_pos = al(metrics.get("sum_toptrader_long_short_ratio", pd.DataFrame()))
+    taker_ls = al(metrics.get("sum_taker_long_short_vol_ratio", pd.DataFrame()))
+
+    for name, df in (("ls_retail", ls_retail), ("ls_top_acct", ls_top_acct),
+                     ("ls_top_pos", ls_top_pos), ("taker_ls", taker_ls)):
+        if df.dropna(how="all").empty:
+            continue
+        lg = np.log(df.where(df > 0)).astype("float32")
+        F[name] = lg.clip(-3, 3)
+        F[f"{name}_z"] = _zs(lg, 24 * 30)
+        F[f"{name}_chg_24"] = (lg - lg.shift(24)).clip(-3, 3).astype("float32")
+
+    if not ls_retail.dropna(how="all").empty and not ls_top_pos.dropna(how="all").empty:
+        # large accounts positioned against the crowd is the classic setup
+        F["ls_top_minus_retail"] = (np.log(ls_top_pos.where(ls_top_pos > 0))
+                                    - np.log(ls_retail.where(ls_retail > 0))
+                                    ).clip(-3, 3).astype("float32")
+        F["ls_top_minus_retail_z"] = _zs(F["ls_top_minus_retail"], 24 * 30)
+
+    for k in [c for c in ("oi_chg_24", "oi_chg_4", "oi_over_adv", "ls_retail_z",
+                          "ls_top_minus_retail", "taker_ls_z", "oi_x_ret_24")
+              if c in F]:
+        F[f"cs_{k}"] = _cs_rank(F[k], mask)
+    return F

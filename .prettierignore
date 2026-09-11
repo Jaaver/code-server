@@ -7,3 +7,6 @@ helm-chart
 test/scripts
 test/e2e/extensions/test-extension
 .pc
+
+# Python research project keeps its own formatting
+trading-ai

@@ -31,14 +31,25 @@ def monthly_geo(equity: pd.Series) -> float:
     return float(np.expm1(np.log1p(mr).mean())) if len(mr) else float("nan")
 
 
-def solve_leverage(ds, score, scfg, cost_name, target_monthly, *, lo=0.5, hi=25.0,
-                   iters=9, exec_overrides=None):
-    """Bisect on leverage for the lowest multiple reaching ``target_monthly``."""
+def solve_leverage(ds, score, scfg, cost_name, target_monthly, *, lo=0.5, hi=40.0,
+                   iters=11, exec_overrides=None, bt_kwargs=None):
+    """Bisect on leverage for the lowest multiple reaching ``target_monthly``.
+
+    The gross-notional cap rises with the leverage multiple, because the binding
+    constraint on a diversified market-neutral book is the exchange's leverage
+    limit rather than the volatility target: a unit-gross book of ~100 perps has an
+    annualised volatility of only single-digit percent, so reaching a high
+    volatility target *requires* gross notional well above 1x equity.  The realised
+    average and maximum gross are reported so the requirement is explicit.
+    """
     best = None
+    bt_kwargs = bt_kwargs or {}
     for _ in range(iters):
         mid = 0.5 * (lo + hi)
+        ov = dict(exec_overrides or {})
+        ov.setdefault("max_gross", float(min(25.0, max(4.0, 3.0 * mid))))
         res, _ = P.backtest_scores(ds, score, scfg, cost_name, leverage=mid,
-                                   exec_overrides=exec_overrides)
+                                   exec_overrides=ov, **bt_kwargs)
         res = P.trim_to_oos(res, score)
         g = monthly_geo(res.equity)
         blown = res.blown_up
@@ -46,9 +57,12 @@ def solve_leverage(ds, score, scfg, cost_name, target_monthly, *, lo=0.5, hi=25.
                "sharpe": M.sharpe(res.returns, ds.bars_per_day),
                "max_drawdown": M.max_drawdown(res.equity),
                "ann_vol": float(res.returns.std() * np.sqrt(24 * 365)),
-               "avg_gross": float(res.gross.mean())}
-        log.info("  lev=%.2f -> monthly=%.2f%% dd=%.1f%% sharpe=%.2f blown=%s",
-                 mid, 100 * g, 100 * rec["max_drawdown"], rec["sharpe"], blown)
+               "avg_gross": float(res.gross.mean()),
+               "max_gross_realised": float(res.gross.max()),
+               "gross_cap": ov["max_gross"]}
+        log.info("  lev=%.2f -> monthly=%.2f%% vol=%.0f%% dd=%.1f%% sharpe=%.2f "
+                 "gross=%.1f blown=%s", mid, 100 * g, 100 * rec["ann_vol"],
+                 100 * rec["max_drawdown"], rec["sharpe"], rec["avg_gross"], blown)
         if blown or not np.isfinite(g) or g < target_monthly:
             lo = mid
         else:
@@ -73,6 +87,9 @@ def main() -> int:
     ap.add_argument("--max-weight", type=float, default=0.06)
     ap.add_argument("--target-monthly", type=float, default=0.33)
     ap.add_argument("--aums", default="1e6,1e7,5e7,2e8")
+    ap.add_argument("--factor-model", action="store_true")
+    ap.add_argument("--n-factors", type=int, default=5)
+    ap.add_argument("--smooth-halflife", type=float, default=0.0)
     ap.add_argument("--n-trials", type=int, default=40,
                     help="number of configurations searched, for the deflated Sharpe")
     args = ap.parse_args()
@@ -85,6 +102,8 @@ def main() -> int:
                           max_weight=args.max_weight)
     ds = P.build_context(ucfg, scfg, max_date=args.max_date, min_date=args.min_date)
     log.info("context: %d bars, mean universe %.1f", len(ds.mask), ds.mask.sum(axis=1).mean())
+    BT = {"factor_model": args.factor_model, "n_factors": args.n_factors,
+          "smooth_halflife": args.smooth_halflife}
 
     out = {"scores": args.scores, "target_monthly": args.target_monthly}
     bpd = ds.bars_per_day
@@ -93,7 +112,7 @@ def main() -> int:
     base_curves = {}
     out["cost_sensitivity"] = {}
     for cname in COST_SCENARIOS:
-        res, _ = P.backtest_scores(ds, score, scfg, cname, leverage=1.0)
+        res, _ = P.backtest_scores(ds, score, scfg, cname, leverage=1.0, **BT)
         res = P.trim_to_oos(res, score)
         s = M.summarise(res, bpd, n_trials=args.n_trials)
         out["cost_sensitivity"][cname] = s
@@ -114,7 +133,7 @@ def main() -> int:
     out["leverage_calibration"] = {}
     for cname in ("optimistic", "base", "conservative", "brutal"):
         log.info("solving leverage for cost=%s", cname)
-        sol = solve_leverage(ds, score, scfg, cname, args.target_monthly)
+        sol = solve_leverage(ds, score, scfg, cname, args.target_monthly, bt_kwargs=BT)
         if sol is None:
             out["leverage_calibration"][cname] = {"reached": False}
             log.info("  target unreachable under cost=%s within leverage bound", cname)
@@ -144,8 +163,10 @@ def main() -> int:
     out["capacity"] = {}
     lev_base = out["leverage_calibration"].get("base", {}).get("leverage", 1.0)
     for aum in [float(x) for x in args.aums.split(",")]:
-        res, _ = P.backtest_scores(ds, score, scfg, "base", leverage=lev_base,
-                                   exec_overrides={"init_equity": aum})
+        res, _ = P.backtest_scores(
+            ds, score, scfg, "base", leverage=lev_base,
+            exec_overrides={"init_equity": aum,
+                            "max_gross": float(min(25.0, max(4.0, 3.0 * lev_base)))}, **BT)
         res = P.trim_to_oos(res, score)
         s = M.summarise(res, bpd, n_trials=args.n_trials)
         out["capacity"][f"{aum:.0f}"] = {
@@ -155,6 +176,25 @@ def main() -> int:
         log.info("aum=%.0e monthly=%.2f%% sharpe=%.2f truncated=%.1f%%", aum,
                  100 * s["geom_monthly"], s["sharpe"],
                  100 * s["capacity_truncation_frac"])
+
+    # ---- 4b. growth frontier: what gross notional buys what monthly return - #
+    out["growth_frontier"] = []
+    for gross_cap in (2, 4, 6, 8, 10, 12, 15, 20):
+        res, _ = P.backtest_scores(ds, score, scfg, "base", leverage=50.0,
+                                   exec_overrides={"max_gross": float(gross_cap),
+                                                   "vol_scalar_bounds": (0.25, 50.0)},
+                                   **BT)
+        res = P.trim_to_oos(res, score)
+        rec = {"gross_cap": gross_cap, "avg_gross": float(res.gross.mean()),
+               "ann_vol": float(res.returns.std() * np.sqrt(24 * 365)),
+               "geom_monthly": monthly_geo(res.equity),
+               "sharpe": M.sharpe(res.returns, bpd),
+               "max_drawdown": M.max_drawdown(res.equity),
+               "blown_up": bool(res.blown_up)}
+        out["growth_frontier"].append(rec)
+        log.info("gross<=%-3d vol=%3.0f%% monthly=%6.2f%% dd=%5.1f%% sharpe=%.2f blown=%s",
+                 gross_cap, 100 * rec["ann_vol"], 100 * rec["geom_monthly"],
+                 100 * rec["max_drawdown"], rec["sharpe"], rec["blown_up"])
 
     # ---- 5. PBO across the construction configurations searched ---------- #
     grid = []
@@ -169,7 +209,8 @@ def main() -> int:
                              target_ann_vol=args.target_vol, max_gross=args.max_gross,
                              max_weight=g["max_weight"])
         res, _ = P.backtest_scores(ds, score, sc2, "base", leverage=1.0,
-                                   exec_overrides={"no_trade_band": g["no_trade_band"]})
+                                   exec_overrides={"no_trade_band": g["no_trade_band"]},
+                                   **BT)
         res = P.trim_to_oos(res, score)
         rets.append(res.returns.to_numpy())
         labels.append(g)

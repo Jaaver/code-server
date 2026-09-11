@@ -52,7 +52,7 @@ def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s",
                         stream=sys.stdout)
     frozen = json.loads((ROOT / "configs" / "frozen.json").read_text())["config"]
-    top_n = int(os.environ.get("TAI_ENH_TOPN", "180"))
+    top_n = int(os.environ.get("TAI_ENH_TOPN", "150"))
     horizons = os.environ.get("TAI_ENH_HORIZONS", "4,12")
     use_metrics = os.environ.get("TAI_ENH_METRICS", "1") == "1"
 
@@ -62,7 +62,7 @@ def main() -> int:
                 "--tag", "enh", "--top-n", str(top_n),
                 "--horizon", str(frozen["horizon"]), "--horizons", horizons,
                 "--rebalance", str(frozen["rebalance"]),
-                "--train-stride", str(frozen["train_stride"]),
+                "--train-stride", os.environ.get("TAI_ENH_STRIDE", "3"),
                 "--leverages", "1", "--costs", "passive", "--save-scores",
                 "--factor-model", "--estimated-spread",
                 "--no-trade-band", str(frozen["no_trade_band"]),

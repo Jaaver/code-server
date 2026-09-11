@@ -212,9 +212,17 @@ def backtest_scores(ds: Dataset, score: pd.Series, scfg: StrategyConfig,
     return res, cfg
 
 
-def trim_to_oos(res, score: pd.Series):
-    """Restrict an equity curve to the out-of-sample window."""
+def trim_to_oos(res, score: pd.Series, eval_from: str | pd.Timestamp | None = None):
+    """Restrict an equity curve to the evaluated window.
+
+    ``eval_from`` exists for the sealed holdout: the panel has to be loaded from
+    earlier than the holdout start so the rolling universe screen, volatility
+    estimates and factor model are warm by the time the holdout begins, but the
+    performance statistics must cover the holdout only.
+    """
     start = score.index.get_level_values(0).min()
+    if eval_from is not None:
+        start = max(start, pd.Timestamp(eval_from, tz="UTC"))
     keep = res.equity.index >= start
     res.equity = res.equity[keep]
     res.returns = res.returns[keep]

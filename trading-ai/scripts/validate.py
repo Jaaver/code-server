@@ -33,7 +33,7 @@ def monthly_geo(equity: pd.Series) -> float:
 
 
 def solve_leverage(ds, score, scfg, cost_name, target_monthly, *, lo=0.5, hi=40.0,
-                   iters=11, exec_overrides=None, bt_kwargs=None):
+                   iters=11, exec_overrides=None, bt_kwargs=None, eval_from=None):
     """Bisect on leverage for the lowest multiple reaching ``target_monthly``.
 
     The gross-notional cap rises with the leverage multiple, because the binding
@@ -51,7 +51,7 @@ def solve_leverage(ds, score, scfg, cost_name, target_monthly, *, lo=0.5, hi=40.
         ov.setdefault("max_gross", float(min(25.0, max(4.0, 3.0 * mid))))
         res, _ = P.backtest_scores(ds, score, scfg, cost_name, leverage=mid,
                                    exec_overrides=ov, **bt_kwargs)
-        res = P.trim_to_oos(res, score)
+        res = P.trim_to_oos(res, score, eval_from)
         g = monthly_geo(res.equity)
         blown = res.blown_up
         rec = {"leverage": mid, "geom_monthly": g, "blown_up": blown,
@@ -79,7 +79,10 @@ def main() -> int:
     ap.add_argument("--scores", required=True)
     ap.add_argument("--tag", default="validation")
     ap.add_argument("--max-date", default=None)
-    ap.add_argument("--min-date", default=None)
+    ap.add_argument("--min-date", default=None,
+                    help="first bar loaded into the panel (includes warm-up)")
+    ap.add_argument("--eval-from", default=None,
+                    help="first bar counted in the statistics; defaults to --min-date")
     ap.add_argument("--top-n", type=int, default=120)
     ap.add_argument("--horizon", type=int, default=4)
     ap.add_argument("--rebalance", type=int, default=4)
@@ -109,6 +112,7 @@ def main() -> int:
                           target_ann_vol=args.target_vol, max_gross=args.max_gross,
                           max_weight=args.max_weight)
     ds = P.build_context(ucfg, scfg, max_date=args.max_date, min_date=args.min_date)
+    EVAL_FROM = args.eval_from or args.min_date
     log.info("context: %d bars, mean universe %.1f", len(ds.mask), ds.mask.sum(axis=1).mean())
     BT = {"factor_model": args.factor_model, "n_factors": args.n_factors,
           "smooth_halflife": args.smooth_halflife,
@@ -125,7 +129,7 @@ def main() -> int:
     for cname in COST_SCENARIOS:
         res, _ = P.backtest_scores(ds, score, scfg, cname, leverage=1.0,
                                    exec_overrides=dict(BAND), **BT)
-        res = P.trim_to_oos(res, score)
+        res = P.trim_to_oos(res, score, EVAL_FROM)
         s = M.summarise(res, bpd, n_trials=args.n_trials)
         out["cost_sensitivity"][cname] = s
         base_curves[cname] = res.returns
@@ -166,7 +170,8 @@ def main() -> int:
             continue
         log.info("solving leverage for cost=%s", cname)
         sol = solve_leverage(ds, score, scfg, cname, args.target_monthly,
-                             exec_overrides=dict(BAND), bt_kwargs=BT)
+                             exec_overrides=dict(BAND), bt_kwargs=BT,
+                             eval_from=EVAL_FROM)
         if sol is None:
             out["leverage_calibration"][cname] = {"reached": False}
             log.info("  target unreachable under cost=%s within leverage bound", cname)
@@ -202,7 +207,7 @@ def main() -> int:
             ds, score, scfg, "base", leverage=lev_base,
             exec_overrides={**BAND, "init_equity": aum,
                             "max_gross": float(min(25.0, max(4.0, 3.0 * lev_base)))}, **BT)
-        res = P.trim_to_oos(res, score)
+        res = P.trim_to_oos(res, score, EVAL_FROM)
         s = M.summarise(res, bpd, n_trials=args.n_trials)
         out["capacity"][f"{aum:.0f}"] = {
             "geom_monthly": s["geom_monthly"], "sharpe": s["sharpe"],
@@ -219,7 +224,7 @@ def main() -> int:
                                    exec_overrides={**BAND, "max_gross": float(gross_cap),
                                                    "vol_scalar_bounds": (0.25, 50.0)},
                                    **BT)
-        res = P.trim_to_oos(res, score)
+        res = P.trim_to_oos(res, score, EVAL_FROM)
         rec = {"gross_cap": gross_cap, "avg_gross": float(res.gross.mean()),
                "ann_vol": float(res.returns.std() * np.sqrt(24 * 365)),
                "geom_monthly": monthly_geo(res.equity),
@@ -246,7 +251,7 @@ def main() -> int:
         res, _ = P.backtest_scores(ds, score, sc2, "base", leverage=1.0,
                                    exec_overrides={"no_trade_band": g["no_trade_band"]},
                                    **BT)
-        res = P.trim_to_oos(res, score)
+        res = P.trim_to_oos(res, score, EVAL_FROM)
         rets.append(res.returns.to_numpy())
         labels.append(g)
     n = min(len(r) for r in rets)

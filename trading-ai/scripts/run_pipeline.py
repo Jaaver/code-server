@@ -132,7 +132,8 @@ def main() -> int:
                              "--tag", "dev_final", "--max-date", CUTOFF] + common)
     if not (RESULTS_DIR / "holdout" / "validation.json").exists():
         run("validate_holdout", [PY, "-u", str(ROOT / "scripts" / "validate.py"),
-                                 "--tag", "holdout", "--min-date", CUTOFF] + common)
+                                 "--tag", "holdout", "--min-date", "2025-01-01",
+                                 "--eval-from", CUTOFF] + common)
 
     # ---- 6. production model + forward paper trading --------------------- #
     model_name = "prod_2025H1"

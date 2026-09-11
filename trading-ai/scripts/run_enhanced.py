@@ -87,7 +87,8 @@ def main() -> int:
     run("enh_validate_dev", [PY, "-u", str(ROOT / "scripts" / "validate.py"),
                              "--tag", "enh_dev", "--max-date", CUTOFF] + common)
     run("enh_validate_holdout", [PY, "-u", str(ROOT / "scripts" / "validate.py"),
-                                 "--tag", "enh_holdout", "--min-date", CUTOFF] + common)
+                                 "--tag", "enh_holdout", "--min-date", "2025-01-01",
+                                 "--eval-from", CUTOFF] + common)
     log.info("enhanced pass complete")
     return 0
 

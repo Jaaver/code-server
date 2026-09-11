@@ -83,6 +83,7 @@ def main() -> int:
            "no_trade_band": float(best["band"]), "factor_model": True, "n_factors": 5,
            "target_vol": 0.20, "max_weight": 0.06, "embargo": 48, "test_months": 3,
            "train_stride": 2, "estimated_spread": True, "spread_method": "measured",
+           "cost_penalty": 1.0,
            "headline_cost_scenario": "passive", "cutoff": CUTOFF,
            "n_configs_searched": n_configs}
     freeze(cfg, frozen_path,
@@ -121,6 +122,7 @@ def main() -> int:
               "--max-weight", str(cfg["max_weight"]),
               "--smooth-halflife", str(cfg["smooth_halflife"]),
               "--no-trade-band", str(cfg["no_trade_band"]),
+              "--cost-penalty", str(cfg["cost_penalty"]),
               "--factor-model", "--estimated-spread",
               "--target-monthly", str(TARGET),
               "--n-trials", str(n_configs)]

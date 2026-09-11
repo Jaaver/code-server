@@ -80,6 +80,9 @@ def main() -> int:
     ap.add_argument("--n-factors", type=int, default=5)
     ap.add_argument("--smooth-halflife", type=float, default=0.0,
                     help="EWMA halflife (in decision bars) applied to scores")
+    ap.add_argument("--no-trade-band", type=float, default=0.0015)
+    ap.add_argument("--cost-penalty", type=float, default=0.0)
+    ap.add_argument("--estimated-spread", action="store_true")
     ap.add_argument("--horizons", default="",
                     help="comma-separated extra label horizons to ensemble over")
     ap.add_argument("--frozen", default=None,
@@ -169,10 +172,13 @@ def main() -> int:
     curves = {}
     for cname in costs:
         for lev in levs:
-            res, cfg = P.backtest_scores(ds, score, scfg, cname, leverage=lev,
-                                         factor_model=args.factor_model,
-                                         n_factors=args.n_factors,
-                                         smooth_halflife=args.smooth_halflife)
+            res, cfg = P.backtest_scores(
+                ds, score, scfg, cname, leverage=lev,
+                factor_model=args.factor_model, n_factors=args.n_factors,
+                smooth_halflife=args.smooth_halflife,
+                estimated_spread=args.estimated_spread,
+                exec_overrides={"no_trade_band": args.no_trade_band,
+                                "cost_penalty": args.cost_penalty})
             res = P.trim_to_oos(res, score)
             s = M.summarise(res, ds.bars_per_day, n_trials=max(len(levs) * len(costs), 10))
             key = f"{cname}_lev{lev:g}"

@@ -11,6 +11,7 @@ Every feature at bar ``t`` is a function of data whose *close* is at or before
 """
 from __future__ import annotations
 
+import gc
 import logging
 
 import numpy as np
@@ -273,18 +274,31 @@ def build_features_chunked(panel: dict[str, pd.DataFrame], mask: pd.DataFrame,
                            metrics: dict | None = None) -> tuple[pd.DataFrame, dict]:
     """Long-format feature matrix built in overlapping time chunks.
 
-    Holding ~110 wide panels for a 6-year, 500-symbol history costs more memory
+    Holding ~130 wide panels for a 6-year, 800-symbol history costs more memory
     than the machine has.  Chunking bounds peak memory at roughly
     ``n_features * n_symbols * (chunk + warmup)`` floats while producing values
     identical to the unchunked build, provided ``warmup`` covers the longest
     rolling window in :func:`build_feature_panels` (the longest chain is a 720-bar
     statistic z-scored over 720 bars, so ~1500 bars; 2600 leaves a wide margin).
     ``tests/test_chunking.py`` asserts the equivalence.
+
+    The per-chunk results are written straight into one preallocated array rather
+    than collected and concatenated: concatenating a list of chunk frames needs the
+    parts and the result in memory at once, which doubles the peak exactly at the
+    end of the build and is what makes this step run out of memory.
     """
     n = len(mask)
-    parts: list[pd.DataFrame] = []
-    aux_parts: dict[str, list] = {"vol_ann": [], "beta": [], "vol_ref": []}
+    mask_np = mask.to_numpy()
+    n_rows_total = int(mask_np.sum())
     starts = list(range(0, n, chunk))
+
+    data: np.ndarray | None = None
+    names: list[str] = []
+    ts_out = np.empty(n_rows_total, dtype="datetime64[ns]")
+    sym_out = np.empty(n_rows_total, dtype=object)
+    aux_parts: dict[str, list] = {"vol_ann": [], "beta": [], "vol_ref": []}
+    filled = 0
+
     for ci, i0 in enumerate(starts):
         i1 = min(i0 + chunk, n)
         lo = max(0, i0 - warmup)
@@ -295,15 +309,41 @@ def build_features_chunked(panel: dict[str, pd.DataFrame], mask: pd.DataFrame,
         head = i0 - lo
         keep_mask = sub_mask.iloc[head:]
         F = {k: v.iloc[head:] for k, v in F.items()}
-        parts.append(stack_features(F, keep_mask))
+
+        if data is None:
+            names = list(F.keys())
+            data = np.empty((n_rows_total, len(names)), dtype="float32")
+        block = stack_features(F, keep_mask)
+        k = len(block)
+        if k:
+            if list(block.columns) != names:
+                block = block[names]
+            data[filled:filled + k] = block.to_numpy(dtype="float32")
+            # store UTC instants as naive datetime64 and re-attach UTC at the end;
+            # .to_numpy() on a tz-aware index warns about exactly this conversion
+            ts_out[filled:filled + k] = (block.index.get_level_values(0)
+                                         .tz_convert(None).to_numpy())
+            sym_out[filled:filled + k] = np.asarray(block.index.get_level_values(1),
+                                                    dtype=object)
+            filled += k
         for key in aux_parts:
             aux_parts[key].append(aux[key].iloc[head:])
-        del F, aux, sub, sub_mask, sub_met
+        del F, aux, sub, sub_mask, sub_met, block
+        gc.collect()
         if log_progress:
-            log.info("features chunk %d/%d (%s..%s) rows=%d", ci + 1, len(starts),
-                     mask.index[i0].date(), mask.index[i1 - 1].date(), len(parts[-1]))
-    X = pd.concat(parts)
-    del parts
+            log.info("features chunk %d/%d (%s..%s) rows=%d/%d", ci + 1, len(starts),
+                     mask.index[i0].date(), mask.index[i1 - 1].date(), filled,
+                     n_rows_total)
+
+    if data is None:
+        raise RuntimeError("no feature chunks produced")
+    if filled != n_rows_total:
+        data = data[:filled]
+        ts_out = ts_out[:filled]
+        sym_out = sym_out[:filled]
+    idx = pd.MultiIndex.from_arrays(
+        [pd.DatetimeIndex(ts_out, tz="UTC"), sym_out], names=["ts", "symbol"])
+    X = pd.DataFrame(data, index=idx, columns=names, copy=False)
     aux = {k: pd.concat(v) for k, v in aux_parts.items()}
     return X, aux
 

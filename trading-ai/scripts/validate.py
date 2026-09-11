@@ -20,6 +20,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from tai.config import COST_SCENARIOS, RESULTS_DIR, StrategyConfig, UniverseConfig
+from tai.evaluation import growth as G
 from tai.evaluation import metrics as M
 from tai.research import pipeline as P
 
@@ -92,6 +93,8 @@ def main() -> int:
     ap.add_argument("--smooth-halflife", type=float, default=0.0)
     ap.add_argument("--no-trade-band", type=float, default=0.0015)
     ap.add_argument("--cost-penalty", type=float, default=0.0)
+    ap.add_argument("--headline-cost", default="passive",
+                    help="cost scenario used for the headline statistics")
     ap.add_argument("--estimated-spread", action="store_true",
                     help="charge the measured per-symbol spread instead of a constant")
     ap.add_argument("--spread-method", default="measured", choices=("measured", "highlow"))
@@ -130,8 +133,26 @@ def main() -> int:
                  cname, s["sharpe"], 100 * s["geom_monthly"], 100 * s["max_drawdown"],
                  s["daily_turnover"], 100 * s["total_cost_frac_of_initial"])
 
+    # ---- 1b. is the monthly target reachable at all, given this Sharpe? --- #
+    # Leverage rescales an edge, it does not create one: expected log growth is
+    # S*s - s^2/2, so the target sets a hard floor on the Sharpe ratio before the
+    # question of leverage even arises.  Record the verdict per cost scenario.
+    out["growth_verdict"] = {}
+    for cname, srec in out["cost_sensitivity"].items():
+        vpg = (srec["ann_vol"] / srec["avg_gross"]) if srec["avg_gross"] > 0 else float("nan")
+        v = G.verdict(srec["sharpe"], args.target_monthly, vpg)
+        v["vol_per_unit_gross"] = vpg
+        out["growth_verdict"][cname] = v
+        log.info("verdict %-13s sharpe=%.2f need=%.2f -> %s (max %.1f%%/mo)%s", cname,
+                 v["sharpe"], v["required_sharpe"],
+                 "reachable" if v["reachable"] else "UNREACHABLE",
+                 100 * v["max_monthly_at_growth_optimal_leverage"],
+                 ("  needs vol %.0f%%, gross %.1fx" %
+                  (100 * v["required_ann_vol"], v["required_gross"]))
+                 if v["reachable"] else "")
+
     # ---- 2. statistical confidence on the base scenario ------------------ #
-    r_base = base_curves["base"]
+    r_base = base_curves.get(args.headline_cost, base_curves["base"])
     out["bootstrap_sharpe"] = M.block_bootstrap_sharpe(r_base, n_boot=2000, block=24 * 7,
                                                        bars_per_day=bpd)
     out["bootstrap_monthly_unit_risk"] = M.bootstrap_monthly(r_base, n_boot=2000,
@@ -140,7 +161,9 @@ def main() -> int:
 
     # ---- 3. leverage calibration to the monthly target ------------------- #
     out["leverage_calibration"] = {}
-    for cname in ("optimistic", "base", "conservative", "brutal"):
+    for cname in ("maker_only", "passive", "base", "conservative", "brutal"):
+        if cname not in COST_SCENARIOS:
+            continue
         log.info("solving leverage for cost=%s", cname)
         sol = solve_leverage(ds, score, scfg, cname, args.target_monthly,
                              exec_overrides=dict(BAND), bt_kwargs=BT)
@@ -159,7 +182,8 @@ def main() -> int:
                                                       bars_per_day=bpd)
         rec["reached"] = True
         out["leverage_calibration"][cname] = rec
-        if cname == "base":
+        if cname == args.headline_cost:
+            (RESULTS_DIR / args.tag).mkdir(parents=True, exist_ok=True)
             M.monthly_returns(res.equity).to_csv(
                 RESULTS_DIR / args.tag / "monthly_returns_target.csv")
             res.equity.to_csv(RESULTS_DIR / args.tag / "equity_target.csv")
@@ -171,7 +195,8 @@ def main() -> int:
 
     # ---- 4. capacity: participation truncation vs AUM -------------------- #
     out["capacity"] = {}
-    lev_base = out["leverage_calibration"].get("base", {}).get("leverage", 1.0)
+    lev_base = (out["leverage_calibration"].get(args.headline_cost, {})
+                .get("leverage", 1.0))
     for aum in [float(x) for x in args.aums.split(",")]:
         res, _ = P.backtest_scores(
             ds, score, scfg, "base", leverage=lev_base,

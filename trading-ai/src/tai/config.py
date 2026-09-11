@@ -63,6 +63,11 @@ COST_SCENARIOS = {
     # A book with a multi-hour horizon does not have to cross the spread: it can
     # work orders passively across the bar and be filled by someone else's urgency.
     # This scenario assumes 80% of the flow rests and earns the maker fee tier.
+    # Orders worked entirely passively: the fee tier is the whole cost and the
+    # spread is earned rather than paid.  Achievable at a multi-hour horizon, but
+    # it assumes away adverse selection on the fills, so it is the optimistic end.
+    "maker_only": CostModel(taker_fee_bps=5.0, maker_fee_bps=2.0, maker_ratio=1.0,
+                            half_spread_bps=2.0, impact_coef=15.0),
     "passive": CostModel(taker_fee_bps=5.0, maker_fee_bps=2.0, maker_ratio=0.8,
                          half_spread_bps=2.0, impact_coef=20.0),
     "optimistic": CostModel(taker_fee_bps=4.0, maker_fee_bps=1.8, maker_ratio=0.5,

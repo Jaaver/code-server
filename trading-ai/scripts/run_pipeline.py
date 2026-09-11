@@ -124,6 +124,7 @@ def main() -> int:
               "--no-trade-band", str(cfg["no_trade_band"]),
               "--cost-penalty", str(cfg["cost_penalty"]),
               "--factor-model", "--estimated-spread",
+              "--headline-cost", cfg["headline_cost_scenario"],
               "--target-monthly", str(TARGET),
               "--n-trials", str(n_configs)]
     if not (RESULTS_DIR / "dev_final" / "validation.json").exists():

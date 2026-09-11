@@ -8,11 +8,29 @@ answer one question honestly:
 > what risk?**
 
 The answer this repository produces, with the evidence behind it, is in
-[`reports/RESULTS.md`](reports/RESULTS.md). The short version: the *alpha* is real
-and survives out-of-sample testing, costs, funding, capacity limits and a sealed
-holdout; 33%/month is reachable only by levering that alpha to a volatility level
-whose drawdown and ruin statistics are stated explicitly, and only at a capital
-base small relative to the market. Both halves of that sentence are load-bearing.
+[`reports/RESULTS.md`](reports/RESULTS.md).
+
+The question turns out to be arithmetic before it is empirical. A book run at
+annualised volatility *s* with annualised Sharpe *S* compounds at
+
+    g(s) = S*s - s^2 / 2
+
+because expected return grows linearly in leverage while volatility drag grows
+with its square. That peaks at *s = S*, so the best compound growth **any** book
+can reach, at **any** leverage, is *S^2 / 2* per year. Turning it around: 33% a
+month requires
+
+    S >= sqrt(24 * ln(1.33)) = 2.616
+
+before the question of how much leverage the exchange permits even arises. Below
+that Sharpe the target is unreachable at every leverage; above it, the target
+fixes the volatility, and the volatility fixes the gross notional and the
+drawdowns. `src/tai/evaluation/growth.py` computes this, `tests/test_growth.py`
+checks it against the closed form, and the validation step evaluates the verdict
+separately for each execution-cost assumption rather than asserting one in prose.
+
+So the work divides in two: measure the net Sharpe honestly, then report exactly
+what the target would cost in leverage and risk at that Sharpe.
 
 ---
 
@@ -58,19 +76,32 @@ src/tai/
   backtest/
     engine.py            bar-level perpetual simulator
     risk.py              trailing PCA factor model, neutralisation, score smoothing
+    costs.py             effective-spread estimators and the fitted liquidity model
   evaluation/
     metrics.py           Sharpe/Sortino/Calmar, PSR, deflated Sharpe, CSCV PBO,
                          block bootstrap, risk of ruin, information coefficient
+    growth.py            required Sharpe, growth-optimal leverage, reachability
+    charts.py            dependency-free SVG for the report
+  freeze.py              hash-checked configuration freezing for the holdout
   live/
     adapters.py          exchange REST adapter + official T+1 archive adapter
     paper_trader.py      sequential forward paper-trading loop (production code path)
 scripts/
-  fetch_data.py          download and cache the archive
+  fetch_data.py          download and cache the kline archive
+  fetch_metrics.py       download the open-interest / positioning archive
+  calibrate_spread.py    measure the real effective spread from the trade archive
   build_panel.py         assemble panels
   run_research.py        walk-forward + backtest sweep
+  baselines.py           single-feature analytic strategies, same simulator
+  diagnostics.py         signal decay, IC stability, construction frontier
   train_final.py         fit the production model up to a cutoff
   paper_forward.py       forward paper-trade a period the model never saw
-  validate.py            full validation battery
+  validate.py            full validation battery + the reachability verdict
+  freeze_config.py       freeze the configuration chosen on development data
+  run_pipeline.py        run the whole thing unattended
+  run_enhanced.py        second pass: more breadth, two horizons, positioning
+  make_report.py         assemble reports/RESULTS.md from the result JSONs
+  make_artifact.py       render the same figures as a publishable page
 tests/                   leakage, timing, neutrality, P&L reconciliation, chunk equivalence
 ```
 
@@ -93,10 +124,17 @@ Every one of these is enforced in code and, where testable, asserted in `tests/`
    returns of coins that quietly vanished.
 5. **Purge and embargo.** Training data stops `horizon + embargo` bars before each
    test window, so no training label overlaps the test period.
-6. **Costs that scale with size.** Each side pays exchange fees, a half-spread, and
-   square-root impact in the participation rate computed against that bar's *actual*
-   dollar volume; trades above a participation cap are truncated rather than assumed
-   fillable. This is what makes the capacity numbers meaningful.
+6. **Costs that scale with size, and a spread that was measured rather than
+   assumed.** Each side pays exchange fees, a half-spread, and square-root impact in
+   the participation rate computed against that bar's *actual* dollar volume; trades
+   above a participation cap are truncated rather than assumed fillable. The spread
+   is not a guess: `scripts/calibrate_spread.py` recovers it from the exchange's
+   aggregated-trade archive, which publishes the aggressor side of every print, so
+   the notional-weighted buy price minus sell price inside a minute *is* the
+   effective spread. Cross-checked against the tick size and the Roll estimator.
+   (The Corwin-Schultz high-low proxy, tried first, reads hourly crypto volatility
+   as spread and overstates it by more than an order of magnitude; it is kept only
+   as a deliberately pessimistic stress case.)
 7. **Funding is paid.** 8-hourly funding is settled on the realised historical rate
    for every open position — a cost the naive crypto backtest omits and which
    dominates carry-style signals.

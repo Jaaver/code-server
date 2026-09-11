@@ -204,7 +204,7 @@ def main() -> int:
                 .get("leverage", 1.0))
     for aum in [float(x) for x in args.aums.split(",")]:
         res, _ = P.backtest_scores(
-            ds, score, scfg, "base", leverage=lev_base,
+            ds, score, scfg, args.headline_cost, leverage=lev_base,
             exec_overrides={**BAND, "init_equity": aum,
                             "max_gross": float(min(25.0, max(4.0, 3.0 * lev_base)))}, **BT)
         res = P.trim_to_oos(res, score, EVAL_FROM)
@@ -220,7 +220,7 @@ def main() -> int:
     # ---- 4b. growth frontier: what gross notional buys what monthly return - #
     out["growth_frontier"] = []
     for gross_cap in (2, 4, 6, 8, 10, 12, 15, 20):
-        res, _ = P.backtest_scores(ds, score, scfg, "base", leverage=50.0,
+        res, _ = P.backtest_scores(ds, score, scfg, args.headline_cost, leverage=50.0,
                                    exec_overrides={**BAND, "max_gross": float(gross_cap),
                                                    "vol_scalar_bounds": (0.25, 50.0)},
                                    **BT)
@@ -235,6 +235,22 @@ def main() -> int:
         log.info("gross<=%-3d vol=%3.0f%% monthly=%6.2f%% dd=%5.1f%% sharpe=%.2f blown=%s",
                  gross_cap, 100 * rec["ann_vol"], 100 * rec["geom_monthly"],
                  100 * rec["max_drawdown"], rec["sharpe"], rec["blown_up"])
+
+    # ---- 4c. the honest ceiling: best monthly return without liquidation --- #
+    ok = [r for r in out["growth_frontier"] if not r["blown_up"]]
+    if ok:
+        best = max(ok, key=lambda r: r["geom_monthly"])
+        out["max_sustainable"] = best
+        deep = [r for r in ok if r["max_drawdown"] > -0.50]
+        out["max_sustainable_dd50"] = (max(deep, key=lambda r: r["geom_monthly"])
+                                       if deep else None)
+        log.info("best monthly without liquidation: %.2f%% at gross %.1fx (dd %.0f%%)",
+                 100 * best["geom_monthly"], best["avg_gross"],
+                 100 * best["max_drawdown"])
+        if out["max_sustainable_dd50"]:
+            b2 = out["max_sustainable_dd50"]
+            log.info("best monthly with drawdown under 50%%: %.2f%% at gross %.1fx",
+                     100 * b2["geom_monthly"], b2["avg_gross"])
 
     # ---- 5. PBO across the construction configurations searched ---------- #
     grid = []

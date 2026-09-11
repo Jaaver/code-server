@@ -355,8 +355,12 @@ def run_backtest(panel: dict[str, pd.DataFrame], scores: pd.DataFrame, mask: pd.
             trade_notional = dw * equity
             requested_notional += float(np.abs(trade_notional).sum())
 
-            # participation cap -> truncate trades we cannot realistically do
-            bar_dv = np.nan_to_num(qv[t], nan=0.0)
+            # Participation cap -> truncate trades we cannot realistically do.
+            # A book that rebalances every ``holding_bars`` bars works its orders
+            # across that interval rather than dumping them into the opening bar,
+            # so the liquidity available to a trade is the interval's volume, not
+            # one bar's.  Using one bar understates capacity by ~holding_bars.
+            bar_dv = np.nan_to_num(qv[t], nan=0.0) * max(cfg.holding_bars, 1)
             cap_notional = cfg.max_participation * bar_dv
             over = np.abs(trade_notional) > cap_notional
             if over.any():

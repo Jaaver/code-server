@@ -219,9 +219,11 @@ def test_participation_cap_truncates_large_trades(panel, mask):
     vol = pd.DataFrame(0.6, index=mask.index, columns=mask.columns)
     beta = pd.DataFrame(1.0, index=mask.index, columns=mask.columns)
     small = run_backtest(panel, sc, mask, vol, beta, CostModel(),
-                         ExecConfig(init_equity=1e5, max_participation=0.05))
+                         ExecConfig(init_equity=1e5, max_participation=0.05,
+                                    holding_bars=4))
     huge = run_backtest(panel, sc, mask, vol, beta, CostModel(),
-                        ExecConfig(init_equity=1e11, max_participation=0.05))
+                        ExecConfig(init_equity=1e11, max_participation=0.05,
+                                   holding_bars=4))
     assert small.diagnostics["truncation_frac"] < 0.01
     assert huge.diagnostics["truncation_frac"] > 0.5
 
@@ -274,3 +276,19 @@ def test_kline_alias_normalisation_keeps_the_trade_count():
     # the headerless spelling is already canonical and must pass through unchanged
     raw2 = raw.rename(columns={"count": "trades"})
     assert "trades" in raw2.rename(columns=KLINE_ALIASES).columns
+
+
+def test_longer_holding_period_buys_more_capacity(panel, mask):
+    """Working an order across the rebalance interval raises what can be filled."""
+    rng = np.random.default_rng(11)
+    sc = pd.DataFrame(rng.normal(size=mask.shape), index=mask.index, columns=mask.columns)
+    sc.iloc[[i for i in range(len(sc)) if i % 12]] = np.nan
+    vol = pd.DataFrame(0.6, index=mask.index, columns=mask.columns)
+    beta = pd.DataFrame(1.0, index=mask.index, columns=mask.columns)
+    one_bar = run_backtest(panel, sc, mask, vol, beta, CostModel(),
+                           ExecConfig(init_equity=5e8, max_participation=0.05,
+                                      holding_bars=1))
+    worked = run_backtest(panel, sc, mask, vol, beta, CostModel(),
+                          ExecConfig(init_equity=5e8, max_participation=0.05,
+                                     holding_bars=12))
+    assert worked.diagnostics["truncation_frac"] < one_bar.diagnostics["truncation_frac"]

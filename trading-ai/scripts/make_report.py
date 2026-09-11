@@ -18,6 +18,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from tai.config import RESULTS_DIR
+from tai.evaluation import growth as G
 from tai.evaluation import metrics as M
 from tai.evaluation.charts import drawdown_svg, equity_svg, monthly_bars_svg
 
@@ -170,6 +171,25 @@ def main() -> int:
     for label, v in (("Development", val), ("Sealed holdout", val_h)):
         if not v:
             continue
+        gv = v.get("growth_verdict") or {}
+        if gv:
+            A(f"\n## {label}: is the target reachable at all?\n")
+            A("Expected log growth for a book at annualised volatility *s* with Sharpe "
+              "*S* is `S*s - s^2/2`, which peaks at `s = S` with value `S^2/2`. A "
+              f"{100 * args.target:.0f}% monthly target therefore requires "
+              f"`S >= sqrt(24*ln(1+{args.target:.2f}))` = "
+              f"**{num(G.required_sharpe(args.target), 3)}** before leverage is even "
+              "considered.\n")
+            rows = []
+            for cname, rec in gv.items():
+                rows.append([cname, num(rec["sharpe"]), num(rec["required_sharpe"]),
+                             pct(rec["max_monthly_at_growth_optimal_leverage"], 1),
+                             pct(rec.get("required_ann_vol"), 0),
+                             num(rec.get("required_gross"), 1),
+                             "reachable" if rec["reachable"] else "unreachable"])
+            A(table(rows, ["execution", "net Sharpe", "Sharpe required",
+                           "best monthly at any leverage", "vol for target",
+                           "gross for target", "verdict"]))
         A(f"\n## {label}: unit-risk book (leverage 1.0, 20% volatility target)\n")
         A(cost_table(v["cost_sensitivity"]))
         bs = v.get("bootstrap_sharpe") or {}

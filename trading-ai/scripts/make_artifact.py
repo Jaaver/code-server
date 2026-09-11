@@ -200,17 +200,28 @@ def build(summary: dict, charts: dict, target: float) -> str:
     P = parts.append
 
     # ---- header ---------------------------------------------------------- #
-    reached = bool(op)
+    gv = primary.get("growth_verdict") or {}
+    headline = (summary.get("frozen") or {}).get("config", {}).get(
+        "headline_cost_scenario", "passive")
+    gvh = gv.get(headline, {})
+    need = gvh.get("required_sharpe")
+    reached = bool(op) and bool(gvh.get("reachable"))
     if reached:
-        answer = (f"Yes &mdash; but only by levering a Sharpe-"
-                  f"{nm(cs.get('sharpe'))} market-neutral book to "
-                  f"{pc(op.get('ann_vol'), 0)} annualised volatility, which means "
-                  f"{nm(op.get('avg_gross'), 1)}&times; average gross notional and a "
-                  f"{pc(op.get('max_drawdown'), 0)} worst drawdown.")
+        answer = (f"Yes, but only under the most favourable execution assumption. It "
+                  f"takes a Sharpe-{nm(cs.get('sharpe'))} market-neutral book levered to "
+                  f"{pc(gvh.get('required_ann_vol'), 0)} annualised volatility &mdash; "
+                  f"about {nm(gvh.get('required_gross'), 0)}&times; gross notional &mdash; "
+                  f"and the drawdowns that go with it.")
+    elif gvh:
+        answer = (f"No. The edge is real and survives costs out of sample, but "
+                  f"{100 * target:.0f}% a month needs a Sharpe ratio of "
+                  f"{nm(need)} before leverage enters the question at all, and this book "
+                  f"nets {nm(cs.get('sharpe'))}. At its growth-optimal leverage it tops "
+                  f"out near {pc(gvh.get('max_monthly_at_growth_optimal_leverage'), 1)} "
+                  f"a month &mdash; and no one should run a book there.")
     else:
-        answer = ("Not at a leverage the venue permits. The alpha is real and survives "
-                  "costs out of sample, but the gross notional required to compound it "
-                  "at the target rate exceeds what a perpetual-futures book can carry.")
+        answer = ("The edge is real and survives costs out of sample; what the target "
+                  "costs in leverage and drawdown is set out below.")
 
     P('<header class="stack">'
       f'<span class="eyebrow">{which} &middot; binance usd-m perpetuals &middot; '
@@ -235,6 +246,40 @@ def build(summary: dict, charts: dict, target: float) -> str:
             "penalised for the search"),
     ]
     P('<section><div class="kpis">' + "".join(kpis) + "</div></section>")
+
+    # ---- the arithmetic that decides the question ------------------------ #
+    if gv:
+        rows = []
+        for cname in ("maker_only", "passive", "base", "conservative", "brutal"):
+            v = gv.get(cname)
+            if not v:
+                continue
+            rows.append([
+                cname.replace("_", " "), nm(v["sharpe"]), nm(v["required_sharpe"]),
+                pc(v["max_monthly_at_growth_optimal_leverage"], 1),
+                (pc(v["required_ann_vol"], 0) if v["reachable"] else "&mdash;"),
+                (f'{nm(v["required_gross"], 0)}&times;' if v["reachable"] else "&mdash;"),
+                ('<span class="pos">reachable</span>' if v["reachable"]
+                 else '<span class="neg">unreachable</span>')])
+        P(f'<section><h2>Why the answer is arithmetic before it is empirical</h2>'
+          '<div class="measure stack">'
+          '<p>Leverage rescales an edge; it does not create one. A book run at '
+          'annualised volatility <em>s</em> with Sharpe <em>S</em> compounds at '
+          '<em>S&middot;s &minus; s&sup2;/2</em> &mdash; the return grows linearly in '
+          'leverage but the volatility drag grows with its square. That expression '
+          'peaks at <em>s = S</em>, so the best compound growth any book can reach, at '
+          'any leverage, is <em>S&sup2;/2</em> per year.</p>'
+          f'<p>Turning that around: {100 * target:.0f}% a month requires '
+          f'<strong>Sharpe &ge; {nm(need)}</strong> '
+          f'(&radic;(24&nbsp;&middot;&nbsp;ln&nbsp;{1 + target:.2f})). Below that the '
+          'target is not a question of how much leverage the exchange allows &mdash; it '
+          'is unreachable at every leverage. Above it, the target fixes the volatility, '
+          'and the volatility fixes the gross notional and the drawdowns.</p></div>'
+          + tbl(["execution", "net Sharpe", "Sharpe needed", "best monthly at any leverage",
+                 "volatility for target", "gross for target", "verdict"], rows,
+                "Computed by evaluation/growth.py from each scenario's measured "
+                "out-of-sample Sharpe; the code is unit-tested against the closed form.")
+          + "</section>")
 
     # ---- what it trades -------------------------------------------------- #
     P('<section><h2>What the model is</h2>'
@@ -434,9 +479,11 @@ def build(summary: dict, charts: dict, target: float) -> str:
                            "No liquidated path at the reported operating leverage",
                            "none" if not (opsum.get("blown_up") or anyblown) else "one or more"))
     crits.append(criterion(reached,
-                           f"Target reachable within venue leverage limits",
-                           f"{nm(op.get('avg_gross'), 1)}&times; gross" if reached
-                           else "not reachable"))
+                           f"{100 * target:.0f}%/month reachable at the headline "
+                           f"execution assumption",
+                           (f"{nm(gvh.get('required_gross'), 0)}&times; gross needed"
+                            if reached else
+                            f"needs Sharpe {nm(need)}, has {nm(cs.get('sharpe'))}")))
     P('<section><h2>Against the criteria set before the holdout was opened</h2>'
       '<div class="measure"><p>These thresholds are recorded in '
       '<code>reports/PROTOCOL.md</code>, written before the holdout period was '

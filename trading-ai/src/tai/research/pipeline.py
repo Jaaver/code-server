@@ -199,7 +199,8 @@ def backtest_scores(ds: Dataset, score: pd.Series, scfg: StrategyConfig,
     cfg = ExecConfig(target_ann_vol=scfg.target_ann_vol, leverage=leverage,
                      max_gross=scfg.max_gross, max_weight=scfg.max_weight,
                      bars_per_day=ds.bars_per_day, dollar_neutral=scfg.dollar_neutral,
-                     beta_neutral=scfg.beta_neutral)
+                     beta_neutral=scfg.beta_neutral,
+                     holding_bars=max(scfg.rebalance_every, 1))
     if exec_overrides:
         for k, v in exec_overrides.items():
             setattr(cfg, k, v)

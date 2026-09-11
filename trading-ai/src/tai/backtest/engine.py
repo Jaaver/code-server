@@ -46,6 +46,11 @@ class ExecConfig:
     partial_adjust: float = 1.0       # 1.0 = go fully to target
     init_equity: float = 1_000_000.0
     delist_cost_mult: float = 3.0
+    # Shrink weights on names whose round-trip cost is large relative to the
+    # volatility they contribute over one holding period.  0 disables; ~1 weighs
+    # alpha and cost equally.
+    cost_penalty: float = 0.0
+    holding_bars: int = 4
     allow_bankruptcy_stop: bool = True
 
 
@@ -127,7 +132,8 @@ def target_weights(score: np.ndarray, vol: np.ndarray, beta: np.ndarray, live: n
 
 
 def target_weights_factor(score: np.ndarray, idio_vol: np.ndarray, L: np.ndarray,
-                          live: np.ndarray, cfg: ExecConfig) -> np.ndarray:
+                          live: np.ndarray, cfg: ExecConfig,
+                          cost_bps: np.ndarray | None = None) -> np.ndarray:
     """Factor-neutral, idiosyncratic-risk-scaled unit-gross weights.
 
     With a factor model in hand the correct denominator is idiosyncratic rather
@@ -147,6 +153,20 @@ def target_weights_factor(score: np.ndarray, idio_vol: np.ndarray, L: np.ndarray
     v = np.where(np.isfinite(v), v, med)
     v = np.clip(v, 0.25 * med, 6.0 * med)
     w = np.where(live, s / v, 0.0)
+    if cfg.cost_penalty > 0 and cost_bps is not None:
+        # A name is worth holding in proportion to alpha per unit of risk, less
+        # what it costs to get in and out of it.  Names whose spread is large
+        # relative to the volatility they contribute get shrunk rather than
+        # excluded, which keeps the book diversified while tilting it toward the
+        # liquid end of the universe.
+        c = np.nan_to_num(cost_bps, nan=0.0) / 1e4
+        # compare the round-trip cost with the volatility earned over one holding
+        # period, not with annualised volatility: the two differ by ~27x at a
+        # 12-hour horizon, which is the difference between a real tilt and a no-op
+        bars_year = cfg.bars_per_day * 365.0
+        v_period = np.maximum(v, 1e-6) * np.sqrt(max(cfg.holding_bars, 1) / bars_year)
+        drag = cfg.cost_penalty * c / v_period
+        w = w / (1.0 + np.clip(drag, 0.0, 20.0))
     w = neutralise(w, L, live, cfg.dollar_neutral)
     g = np.abs(w).sum()
     if g <= EPS:
@@ -285,7 +305,8 @@ def run_backtest(panel: dict[str, pd.DataFrame], scores: pd.DataFrame, mask: pd.
                 L_t = fm_L[si]
                 idio_t = fm_idio[si] * np.sqrt(bars_year)
                 live = live & np.isfinite(idio_t) & (np.abs(L_t).sum(axis=1) > 0)
-                w_t = target_weights_factor(sc[t - 1], idio_t, L_t, live, cfg)
+                w_t = target_weights_factor(sc[t - 1], idio_t, L_t, live, cfg,
+                                            cost_bps=hs[t] * 2.0)
             else:
                 w_t = target_weights(sc[t - 1], vl[t - 1], bt[t - 1], live, cfg)
 

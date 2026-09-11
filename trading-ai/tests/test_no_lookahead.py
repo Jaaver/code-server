@@ -224,3 +224,36 @@ def test_participation_cap_truncates_large_trades(panel, mask):
                         ExecConfig(init_equity=1e11, max_participation=0.05))
     assert small.diagnostics["truncation_frac"] < 0.01
     assert huge.diagnostics["truncation_frac"] > 0.5
+
+
+def test_cost_penalty_tilts_toward_cheap_names():
+    """Expensive names should be shrunk, not excluded, and the book stays neutral."""
+    rng = np.random.default_rng(4)
+    n = 40
+    score = rng.normal(size=n)
+    idio = np.full(n, 0.8)
+    L = np.ones((n, 1))
+    live = np.ones(n, dtype=bool)
+    cheap = np.full(n, 1.0)
+    dear = cheap.copy()
+    dear[:10] = 40.0                      # first ten cost 40 bps a side
+    from tai.backtest.engine import target_weights_factor
+    base_cfg = ExecConfig(cost_penalty=0.0, max_weight=0.2, holding_bars=12)
+    pen_cfg = ExecConfig(cost_penalty=1.0, max_weight=0.2, holding_bars=12)
+    w0 = target_weights_factor(score, idio, L, live, base_cfg, cost_bps=dear)
+    w1 = target_weights_factor(score, idio, L, live, pen_cfg, cost_bps=dear)
+    assert abs(w1.sum()) < 1e-8
+    assert abs(np.abs(w1).sum() - 1.0) < 1e-6
+    # the expensive block loses weight share to the cheap one, by an amount set by
+    # cost relative to the volatility earned over one holding period
+    assert np.abs(w1[:10]).sum() < np.abs(w0[:10]).sum() * 0.95
+    # a name that costs ten times as much is shrunk much harder
+    worse = cheap.copy()
+    worse[:10] = 400.0
+    w2 = target_weights_factor(score, idio, L, live, pen_cfg, cost_bps=worse)
+    assert np.abs(w2[:10]).sum() < np.abs(w1[:10]).sum() * 0.6
+    assert abs(w2.sum()) < 1e-8
+    # with uniform costs the penalty is a no-op up to renormalisation
+    wa = target_weights_factor(score, idio, L, live, base_cfg, cost_bps=cheap)
+    wb = target_weights_factor(score, idio, L, live, pen_cfg, cost_bps=cheap)
+    assert np.allclose(wa, wb, atol=1e-9)

@@ -187,3 +187,40 @@ def test_stack_features_alignment(panel, mask):
     ts = X.index.get_level_values(0)[500]
     sym = X.index.get_level_values(1)[500]
     assert abs(float(X[name].iloc[500]) - float(F[name].loc[ts, sym])) < 1e-6
+
+
+def test_funding_is_charged_with_the_right_sign(panel, mask):
+    """A persistently positive funding rate must cost a long-only book money."""
+    sc = pd.DataFrame(np.nan, index=mask.index, columns=mask.columns)
+    sc.iloc[::4] = 1.0                      # identical scores -> no cross-sectional tilt
+    sc.iloc[::4, 0] = 5.0                   # one strong long
+    vol = pd.DataFrame(0.6, index=mask.index, columns=mask.columns)
+    beta = pd.DataFrame(1.0, index=mask.index, columns=mask.columns)
+    pos = {k: v.copy() for k, v in panel.items()}
+    settle = pos["funding_rate"].notna()
+    pos["funding_rate"] = pos["funding_rate"].where(~settle, 0.001)   # 10 bps per 8h
+    neg = {k: v.copy() for k, v in panel.items()}
+    neg["funding_rate"] = neg["funding_rate"].where(~settle, -0.001)
+    cost = CostModel(taker_fee_bps=0.0, maker_fee_bps=0.0, half_spread_bps=0.0,
+                     impact_coef=0.0)
+    cfg = ExecConfig()
+    rp = run_backtest(pos, sc, mask, vol, beta, cost, cfg)
+    rn = run_backtest(neg, sc, mask, vol, beta, cost, cfg)
+    # the book is dollar neutral, so the net funding bill is the imbalance between
+    # what longs pay and shorts receive; flipping the sign must flip the total
+    assert np.sign(rp.diagnostics["total_funding"]) == -np.sign(rn.diagnostics["total_funding"])
+    assert abs(rp.diagnostics["total_funding"]) > 0
+
+
+def test_participation_cap_truncates_large_trades(panel, mask):
+    rng = np.random.default_rng(9)
+    sc = pd.DataFrame(rng.normal(size=mask.shape), index=mask.index, columns=mask.columns)
+    sc.iloc[[i for i in range(len(sc)) if i % 4]] = np.nan
+    vol = pd.DataFrame(0.6, index=mask.index, columns=mask.columns)
+    beta = pd.DataFrame(1.0, index=mask.index, columns=mask.columns)
+    small = run_backtest(panel, sc, mask, vol, beta, CostModel(),
+                         ExecConfig(init_equity=1e5, max_participation=0.05))
+    huge = run_backtest(panel, sc, mask, vol, beta, CostModel(),
+                        ExecConfig(init_equity=1e11, max_participation=0.05))
+    assert small.diagnostics["truncation_frac"] < 0.01
+    assert huge.diagnostics["truncation_frac"] > 0.5

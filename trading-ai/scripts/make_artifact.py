@@ -28,13 +28,15 @@ CSS = """
   --sans:"IBM Plex Sans",system-ui,-apple-system,Segoe UI,sans-serif;
   --serif:"Newsreader",Georgia,"Times New Roman",serif;
 }
-:root:not([data-theme="light"]){ @media (prefers-color-scheme: dark){
-  --ground:#0c1216; --surface:#121b21; --surface-2:#18242b; --edge:#25343d;
-  --ink:#e6edf0; --ink-2:#a9bac3; --ink-3:#7a8d98;
-  --accent:#4fc3d0; --accent-soft:#16333a;
-  --amber:#e0a83c; --pos:#54b98c; --neg:#e0776a;
-  --chart-line:#4fc3d0; --chart-dd:#e0776a; --grid:#1f2d35;
-}}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#0c1216; --surface:#121b21; --surface-2:#18242b; --edge:#25343d;
+    --ink:#e6edf0; --ink-2:#a9bac3; --ink-3:#7a8d98;
+    --accent:#4fc3d0; --accent-soft:#16333a;
+    --amber:#e0a83c; --pos:#54b98c; --neg:#e0776a;
+    --chart-line:#4fc3d0; --chart-dd:#e0776a; --grid:#1f2d35;
+  }
+}
 :root[data-theme="dark"]{
   --ground:#0c1216; --surface:#121b21; --surface-2:#18242b; --edge:#25343d;
   --ink:#e6edf0; --ink-2:#a9bac3; --ink-3:#7a8d98;

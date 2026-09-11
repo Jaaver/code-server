@@ -1,0 +1,132 @@
+<title>33% a Month, Stress-Tested</title>
+<style>
+:root{
+  --ground:#f5f6f7; --surface:#ffffff; --surface-2:#eceef0; --edge:#d7dbde;
+  --ink:#111a1f; --ink-2:#41525c; --ink-3:#71848f;
+  --accent:#0e7c8a; --accent-soft:#d3e8ea;
+  --amber:#a56c0d; --pos:#2f7d5c; --neg:#a8463c;
+  --chart-line:#0e7c8a; --chart-dd:#a8463c; --grid:#dfe3e6;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --sans:"IBM Plex Sans",system-ui,-apple-system,Segoe UI,sans-serif;
+  --serif:"Newsreader",Georgia,"Times New Roman",serif;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#0c1216; --surface:#121b21; --surface-2:#18242b; --edge:#25343d;
+    --ink:#e6edf0; --ink-2:#a9bac3; --ink-3:#7a8d98;
+    --accent:#4fc3d0; --accent-soft:#16333a;
+    --amber:#e0a83c; --pos:#54b98c; --neg:#e0776a;
+    --chart-line:#4fc3d0; --chart-dd:#e0776a; --grid:#1f2d35;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0c1216; --surface:#121b21; --surface-2:#18242b; --edge:#25343d;
+  --ink:#e6edf0; --ink-2:#a9bac3; --ink-3:#7a8d98;
+  --accent:#4fc3d0; --accent-soft:#16333a;
+  --amber:#e0a83c; --pos:#54b98c; --neg:#e0776a;
+  --chart-line:#4fc3d0; --chart-dd:#e0776a; --grid:#1f2d35;
+}
+*{box-sizing:border-box}
+body{background:var(--ground);color:var(--ink);font-family:var(--sans);
+  font-size:16px;line-height:1.62;-webkit-font-smoothing:antialiased;margin:0}
+.page{max-width:1040px;margin:0 auto;padding-inline:20px;padding-block:40px 72px;
+  display:flex;flex-direction:column;gap:44px}
+.measure{max-width:68ch}
+h1,h2,h3{font-family:var(--serif);font-weight:600;text-wrap:balance;margin:0;
+  letter-spacing:-0.012em}
+h1{font-size:clamp(2rem,4.6vw,2.9rem);line-height:1.12}
+h2{font-size:clamp(1.35rem,2.4vw,1.7rem);line-height:1.2}
+h3{font-size:1.08rem;line-height:1.3}
+p{margin:0}
+.eyebrow{font-family:var(--mono);font-size:.69rem;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--ink-3)}
+.lede{font-size:1.1rem;color:var(--ink-2)}
+section{display:flex;flex-direction:column;gap:18px}
+.stack{display:flex;flex-direction:column;gap:12px}
+hr.rule{border:0;border-top:1px solid var(--edge);margin:0}
+
+.verdict{background:var(--surface);border:1px solid var(--edge);border-radius:4px;
+  padding:24px;display:flex;flex-direction:column;gap:20px}
+.verdict .answer{font-family:var(--serif);font-size:clamp(1.25rem,2.6vw,1.6rem);
+  line-height:1.3;text-wrap:balance}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:1px;
+  background:var(--edge);border:1px solid var(--edge);border-radius:3px;overflow:hidden}
+.kpi{background:var(--surface);padding:14px 16px;display:flex;flex-direction:column;gap:3px}
+.kpi .k{font-family:var(--mono);font-size:.66rem;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--ink-3)}
+.kpi .v{font-family:var(--mono);font-size:1.32rem;font-variant-numeric:tabular-nums;
+  letter-spacing:-0.02em}
+.kpi .n{font-size:.78rem;color:var(--ink-3);line-height:1.35}
+.kpi.warn .v{color:var(--amber)}
+.kpi.good .v{color:var(--pos)}
+
+table{width:100%;border-collapse:collapse;font-size:.87rem;
+  font-variant-numeric:tabular-nums}
+.tw{overflow-x:auto;border:1px solid var(--edge);border-radius:3px;background:var(--surface)}
+th,td{padding:8px 12px;text-align:right;white-space:nowrap;border-top:1px solid var(--edge)}
+thead th{border-top:0;font-family:var(--mono);font-size:.67rem;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--ink-3);font-weight:500;background:var(--surface-2)}
+th:first-child,td:first-child{text-align:left;font-family:var(--sans)}
+tbody tr:hover{background:var(--surface-2)}
+td.mono,th.mono{font-family:var(--mono)}
+.pos{color:var(--pos)}.neg{color:var(--neg)}
+caption{caption-side:bottom;text-align:left;padding:8px 12px;font-size:.78rem;
+  color:var(--ink-3)}
+
+.chart{width:100%;height:auto;display:block}
+.chartbox{background:var(--surface);border:1px solid var(--edge);border-radius:3px;
+  padding:14px 10px 6px}
+.chartbox .cap{font-family:var(--mono);font-size:.67rem;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--ink-3);padding:0 6px 8px}
+.chart .grid{stroke:var(--grid);stroke-width:1}
+.chart .line{fill:none;stroke:var(--chart-line);stroke-width:1.6;
+  stroke-linejoin:round}
+.chart .ddarea{fill:var(--chart-dd);fill-opacity:.26;stroke:var(--chart-dd);
+  stroke-width:1}
+.chart .up{fill:var(--pos)}.chart .dn{fill:var(--neg)}
+.chart .target{stroke:var(--amber);stroke-width:1.3;stroke-dasharray:5 4}
+.chart .ylab,.chart .xlab,.chart .tlab{font-family:var(--mono);font-size:9.5px;
+  fill:var(--ink-3)}
+.chart .ylab{text-anchor:end}.chart .xlab{text-anchor:middle}
+.chart .tlab{fill:var(--amber)}
+
+.criteria{display:flex;flex-direction:column;gap:1px;background:var(--edge);
+  border:1px solid var(--edge);border-radius:3px;overflow:hidden}
+.crit{background:var(--surface);display:grid;grid-template-columns:74px 1fr auto;
+  gap:14px;align-items:baseline;padding:12px 16px}
+.crit .chip{font-family:var(--mono);font-size:.64rem;letter-spacing:.1em;
+  text-transform:uppercase;padding:3px 7px;border-radius:2px;text-align:center}
+.chip.pass{background:var(--accent-soft);color:var(--accent)}
+.chip.fail{background:color-mix(in srgb,var(--neg) 16%,transparent);color:var(--neg)}
+.crit .val{font-family:var(--mono);font-size:.84rem;color:var(--ink-2);
+  font-variant-numeric:tabular-nums;text-align:right}
+.crit .txt{font-size:.9rem}
+
+.note{border-left:2px solid var(--accent);padding:2px 0 2px 16px;color:var(--ink-2);
+  font-size:.93rem}
+ul.tight{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:7px}
+ul.tight li{font-size:.95rem}
+code{font-family:var(--mono);font-size:.85em;background:var(--surface-2);
+  padding:1px 4px;border-radius:2px}
+.foot{font-size:.82rem;color:var(--ink-3);border-top:1px solid var(--edge);padding-top:18px}
+@media (max-width:560px){
+  .crit{grid-template-columns:64px 1fr;row-gap:6px}
+  .crit .val{grid-column:2;text-align:left}
+}
+@media (prefers-reduced-motion:no-preference){
+  .chart .line{stroke-dasharray:6000;stroke-dashoffset:0;
+    animation:draw 1.1s ease-out both}
+  @keyframes draw{from{stroke-dashoffset:6000}to{stroke-dashoffset:0}}
+}
+</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Newsreader:ital,opsz,wght@0,6..72,500;0,6..72,600;1,6..72,400&display=swap">
+<div class="page">
+<header class="stack"><span class="eyebrow">development &middot; binance usd-m perpetuals &middot; hourly bars</span><h1>Can a trading model make 33% a month?</h1><p class="lede measure">The edge is real and survives costs out of sample; what the target costs in leverage and drawdown is set out below.</p></header>
+<section><div class="kpis"><div class="kpi "><span class="k">net Sharpe</span><span class="v">&mdash;</span><span class="n">unit-risk book, base costs, out of sample</span></div><div class="kpi "><span class="k">monthly (geo)</span><span class="v">&mdash;</span><span class="n">at 20% vol target</span></div><div class="kpi warn"><span class="k">max drawdown</span><span class="v">&mdash;</span><span class="n">peak to trough, hourly marks</span></div><div class="kpi warn"><span class="k">gross notional</span><span class="v">&mdash;</span><span class="n">average, cap enforced each bar</span></div><div class="kpi "><span class="k">PBO</span><span class="v">&mdash;</span><span class="n">CSCV, across searched configs</span></div><div class="kpi "><span class="k">deflated Sharpe</span><span class="v">&mdash;</span><span class="n">penalised for the search</span></div></div></section>
+<section><h2>What the model is</h2><div class="measure stack"><p>A gradient-boosted ensemble ranks roughly &mdash; liquid USDT perpetual contracts every four hours and holds a dollar-neutral, factor-neutral long/short book. It does not forecast the direction of crypto; it forecasts which contracts will out- or under-perform their peers over the next few hours, from ~110 features spanning vol-normalised and residual momentum, taker order-flow imbalance, trade-intensity microstructure, funding and open-interest positioning, and market-state conditioning.</p><p>Training is expanding-window walk-forward, retrained quarterly, with a purge and a 48-bar embargo before every test window. Fills are at the next bar's open and pay exchange fees, half the spread, and square-root impact in the participation rate against that bar's actual dollar volume; funding is settled every eight hours on realised rates; delisted contracts are force-liquidated with penalty costs.</p></div></section>
+<section><h2>Against the criteria set before the holdout was opened</h2><div class="measure"><p>These thresholds are recorded in <code>reports/PROTOCOL.md</code>, written before the holdout period was touched, so the verdict could not be negotiated afterwards.</p></div><div class="criteria"><div class="crit"><span class="chip fail">fail</span><span class="txt">Out-of-sample net Sharpe at or above 1.0</span><span class="val">&mdash;</span></div><div class="crit"><span class="chip fail">fail</span><span class="txt">Probability of backtest overfitting at or below 0.50</span><span class="val">&mdash;</span></div><div class="crit"><span class="chip fail">fail</span><span class="txt">Deflated Sharpe ratio at or above 0.95</span><span class="val">&mdash;</span></div><div class="crit"><span class="chip pass">pass</span><span class="txt">No liquidated path at the reported operating leverage</span><span class="val">none</span></div><div class="crit"><span class="chip fail">fail</span><span class="txt">33%/month reachable at the headline execution assumption</span><span class="val">needs Sharpe &mdash;, has &mdash;</span></div></div></section>
+<section><h2>What would break this</h2><ul class="tight measure"><li><strong>Fill assumptions.</strong> The cost model charges a quarter of the flow at maker fees. A book that actually crosses the spread on every order pays the <em>conservative</em> column, not the <em>base</em> one.</li><li><strong>Capacity.</strong> The edge lives in the mid-cap half of the universe. The capacity table shows where the participation cap starts eating the return; past that point the strategy is a different, worse strategy.</li><li><strong>Leverage availability.</strong> The operating point assumes the venue carries the stated gross notional across ~100 contracts at once, through a liquidation cascade, without raising margin requirements. Exchanges raise them exactly when you least want it.</li><li><strong>Crowding.</strong> Short-horizon cross-sectional reversal in crypto is not a secret. The IC-by-year table is the thing to watch: if the edge is being competed away, it shows up there first.</li><li><strong>Regime dependence.</strong> The sample contains one full bull/bear cycle. It does not contain a sustained low-volatility, low-funding crypto market, because one has not happened yet on perpetuals.</li></ul></section>
+<p class="foot">Research output, not investment advice. Figures are simulated on historical data from the exchange&rsquo;s own public archive; simulated results omit failure modes that only appear with real orders in the book. The drawdown and ruin figures above are the load-bearing part of the answer.</p>
+</div>

@@ -49,10 +49,18 @@ def cagr(equity: pd.Series) -> float:
 
 
 def monthly_returns(equity: pd.Series) -> pd.Series:
+    """Calendar-month returns from an equity curve.
+
+    The first partial month is seeded with the curve's opening value so the first
+    month is a real return rather than a spurious 0%.
+    """
     e = equity.dropna()
+    if len(e) < 2:
+        return pd.Series(dtype="float64")
     m = e.resample("ME").last()
-    first = e.iloc[0]
-    m = pd.concat([pd.Series([first], index=[e.index[0].to_period("M").to_timestamp("M")]), m])
+    seed_idx = e.index[0].normalize() - pd.Timedelta(days=1)
+    seed = pd.Series([e.iloc[0]], index=pd.DatetimeIndex([seed_idx], tz=e.index.tz))
+    m = pd.concat([seed, m])
     m = m[~m.index.duplicated(keep="last")].sort_index()
     return (m / m.shift(1) - 1.0).dropna()
 

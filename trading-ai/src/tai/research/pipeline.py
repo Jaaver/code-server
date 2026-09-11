@@ -11,6 +11,8 @@ import numpy as np
 import pandas as pd
 
 from ..backtest.engine import ExecConfig, run_backtest
+from ..backtest.costs import (half_spread_panel, liquidity_half_spread_panel,
+                             load_calibration, spread_summary)
 from ..backtest.risk import rolling_factor_model, smooth_scores
 from ..config import BARS_PER_DAY, COST_SCENARIOS, CACHE_DIR, RESULTS_DIR, StrategyConfig, UniverseConfig
 from ..data import panel as panel_mod
@@ -156,11 +158,40 @@ def get_factor_model(ds: Dataset, n_factors: int = 5, window_days: int = 45,
     return cache[key]
 
 
+def get_spread_panel(ds: Dataset, method: str = "measured") -> pd.DataFrame:
+    """Per-symbol half-spread panel, cached on the Dataset.
+
+    ``measured`` applies the liquidity model fitted to the exchange's own trade
+    archive (see scripts/calibrate_spread.py) and is the default, because the
+    ``highlow`` alternative -- the Corwin-Schultz estimator -- reads most of
+    crypto's hourly volatility as spread and overstates it by an order of
+    magnitude.  ``highlow`` is kept as a deliberately pessimistic stress case.
+    """
+    key = f"_spread_{method}"
+    sp = getattr(ds, key, None)
+    if sp is None:
+        if method == "highlow":
+            sp = half_spread_panel(ds.panel)
+        else:
+            cal = load_calibration(CACHE_DIR / "spread_calibration.json")
+            a, b = (cal["a"], cal["b"]) if cal else (0.35, 1.1)
+            if cal is None:
+                log.warning("no spread calibration on disk; using default a=%.2f b=%.2f", a, b)
+            sp = liquidity_half_spread_panel(ds.panel, a=a, b=b,
+                                             bars_per_day=ds.bars_per_day)
+        object.__setattr__(ds, key, sp)
+        log.info("half spread (bps, %s): %s", method,
+                 {k: round(v, 2) for k, v in spread_summary(sp, ds.mask).items()
+                  if k != "n_obs"})
+    return sp
+
+
 def backtest_scores(ds: Dataset, score: pd.Series, scfg: StrategyConfig,
                     cost_name: str = "base", *, leverage: float = 1.0,
                     exec_overrides: dict | None = None, phase: int = 0,
                     factor_model: bool = False, n_factors: int = 5,
-                    smooth_halflife: float = 0.0):
+                    smooth_halflife: float = 0.0,
+                    estimated_spread: bool = False, spread_method: str = "measured"):
     wide = scores_to_wide(score, ds.mask.index, ds.mask.columns)
     wide = apply_rebalance_schedule(wide, scfg.rebalance_every, phase=phase)
     if smooth_halflife > 0:
@@ -174,8 +205,9 @@ def backtest_scores(ds: Dataset, score: pd.Series, scfg: StrategyConfig,
             setattr(cfg, k, v)
     cost = COST_SCENARIOS[cost_name]
     fm = get_factor_model(ds, n_factors=n_factors) if factor_model else None
+    hs = get_spread_panel(ds, spread_method) if estimated_spread else None
     res = run_backtest(ds.panel, wide, ds.mask, ds.aux["vol_ann"], ds.aux["beta"],
-                       cost, cfg, factor_model=fm)
+                       cost, cfg, factor_model=fm, half_spread_bps=hs)
     return res, cfg
 
 

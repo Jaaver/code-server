@@ -178,7 +178,8 @@ def _portfolio_vol(w: np.ndarray, vol_ann: np.ndarray, rho: float) -> float:
 def run_backtest(panel: dict[str, pd.DataFrame], scores: pd.DataFrame, mask: pd.DataFrame,
                  vol_ann: pd.DataFrame, beta: pd.DataFrame, cost: CostModel,
                  cfg: ExecConfig, *, rho: float = 0.30,
-                 factor_model: tuple | None = None) -> BacktestResult:
+                 factor_model: tuple | None = None,
+                 half_spread_bps: pd.DataFrame | None = None) -> BacktestResult:
     """Simulate the book.  ``scores`` is NaN at bars where no decision is made."""
     syms = list(mask.columns)
     idx = mask.index
@@ -191,6 +192,14 @@ def run_backtest(panel: dict[str, pd.DataFrame], scores: pd.DataFrame, mask: pd.
     mk = mask.reindex(index=idx, columns=syms).to_numpy()
     vl = vol_ann.reindex(index=idx, columns=syms).to_numpy(dtype="float64")
     bt = beta.reindex(index=idx, columns=syms).to_numpy(dtype="float64")
+    # Per-symbol, per-bar half spread (basis points).  When absent, fall back to the
+    # cost model's constant.  Only the taker portion of the flow pays it.
+    if half_spread_bps is not None:
+        hs = half_spread_bps.reindex(index=idx, columns=syms).to_numpy(dtype="float64")
+        hs = np.where(np.isfinite(hs), hs, cost.half_spread_bps)
+    else:
+        hs = np.full((T, N), cost.half_spread_bps)
+    taker_share = 1.0 - cost.maker_ratio
 
     # last printed open, used to liquidate symbols whose data ends
     last_px = np.full(N, np.nan)
@@ -259,7 +268,8 @@ def run_backtest(panel: dict[str, pd.DataFrame], scores: pd.DataFrame, mask: pd.
         if stale.any():
             liq_px = np.nan_to_num(last_px, nan=0.0)
             notion = np.abs(shares * liq_px)[stale].sum()
-            c = notion * (cost.linear_bps * cfg.delist_cost_mult) / 1e4
+            liq_bps = cost.fee_bps + taker_share * float(np.nanmedian(hs[t]))
+            c = notion * (liq_bps * cfg.delist_cost_mult) / 1e4
             equity -= c
             cost_arr[t] += c
             notional_arr[t] += notion
@@ -334,7 +344,8 @@ def run_backtest(panel: dict[str, pd.DataFrame], scores: pd.DataFrame, mask: pd.
                                           trade_notional)
 
             part = np.where(bar_dv > 0, np.abs(trade_notional) / bar_dv, 0.0)
-            bps = cost.linear_bps + cost.impact_coef * np.sqrt(np.clip(part, 0, 1))
+            bps = (cost.fee_bps + taker_share * hs[t]
+                   + cost.impact_coef * np.sqrt(np.clip(part, 0, 1)))
             c = float(np.sum(np.abs(trade_notional) * bps) / 1e4)
             equity -= c
             cost_arr[t] += c
@@ -388,6 +399,7 @@ def run_backtest(panel: dict[str, pd.DataFrame], scores: pd.DataFrame, mask: pd.
         blown_up=blown,
         blowup_time=blow_t,
         diagnostics={
+            "mean_half_spread_bps": float(np.nanmean(hs[np.isfinite(hs)])) if hs.size else float("nan"),
             "requested_notional": requested_notional,
             "truncated_notional": truncated_notional,
             "truncation_frac": truncated_notional / max(requested_notional, EPS),

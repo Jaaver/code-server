@@ -60,6 +60,11 @@ class CostModel:
 # Cost scenarios used for sensitivity analysis. "base" is the honest default:
 # VIP-0 taker fees with BNB discount, full spread crossing, sqrt impact.
 COST_SCENARIOS = {
+    # A book with a multi-hour horizon does not have to cross the spread: it can
+    # work orders passively across the bar and be filled by someone else's urgency.
+    # This scenario assumes 80% of the flow rests and earns the maker fee tier.
+    "passive": CostModel(taker_fee_bps=5.0, maker_fee_bps=2.0, maker_ratio=0.8,
+                         half_spread_bps=2.0, impact_coef=20.0),
     "optimistic": CostModel(taker_fee_bps=4.0, maker_fee_bps=1.8, maker_ratio=0.5,
                             half_spread_bps=1.0, impact_coef=15.0),
     "base": CostModel(taker_fee_bps=5.0, maker_fee_bps=2.0, maker_ratio=0.25,

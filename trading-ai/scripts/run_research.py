@@ -80,9 +80,18 @@ def main() -> int:
                     help="EWMA halflife (in decision bars) applied to scores")
     ap.add_argument("--horizons", default="",
                     help="comma-separated extra label horizons to ensemble over")
+    ap.add_argument("--frozen", default=None,
+                    help="path to a frozen config JSON; its values override the CLI")
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    if args.frozen:
+        from tai.freeze import load_frozen
+        frozen = load_frozen(Path(args.frozen))
+        for k, v in frozen.items():
+            if hasattr(args, k):
+                setattr(args, k, v)
+        log.info("loaded frozen config from %s: %s", args.frozen, frozen)
     t0 = time.time()
     ds, ucfg, scfg = build(args)
 

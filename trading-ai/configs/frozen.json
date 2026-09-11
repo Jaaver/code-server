@@ -1,0 +1,35 @@
+{
+  "config": {
+    "interval": "1h",
+    "top_n": 120,
+    "horizon": 4,
+    "rebalance": 12,
+    "smooth_halflife": 0.0,
+    "no_trade_band": 0.008,
+    "factor_model": true,
+    "n_factors": 5,
+    "target_vol": 0.2,
+    "max_weight": 0.06,
+    "embargo": 48,
+    "test_months": 3,
+    "train_stride": 2,
+    "estimated_spread": true,
+    "spread_method": "measured",
+    "cost_penalty": 1.0,
+    "headline_cost_scenario": "passive",
+    "cutoff": "2025-07-01",
+    "n_configs_searched": 108
+  },
+  "dev_metrics": {
+    "sharpe": 2.5374071952998225,
+    "monthly": 0.04452407548467704,
+    "vol": 0.21525622372286268,
+    "dd": -0.3781987426669925,
+    "gross": 1.4517890340532376,
+    "turn": 1.9323644478278315,
+    "cost": "passive"
+  },
+  "note": "construction chosen on the development window only (data before 2025-07-01), from 108 configurations",
+  "frozen_at": "2026-09-11T17:46:37.848073+00:00",
+  "sha256_16": "0cbdd224ad614a5a"
+}

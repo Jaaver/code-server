@@ -47,7 +47,7 @@ def main() -> int:
 
     # ---- signal decay: IC against each forward horizon ------------------- #
     decay = {}
-    for h in (1, 2, 4, 6, 8, 12, 24, 48, 96):
+    for h in (1, 2, 4, 8, 12, 24, 48, 96):
         fwd = forward_return(ds.panel["open"], h).where(ds.mask)
         resid = fwd.sub(ds.aux["beta"].mul(fwd.median(axis=1), axis=0))
         flat = resid.stack(future_stack=True)
@@ -100,14 +100,19 @@ def main() -> int:
 
     # ---- turnover / net-Sharpe frontier ---------------------------------- #
     frontier = []
+    # The development sweep already searched this space in detail; this is the
+    # condensed version kept in the report for the shape of the trade-off.
     for fm in (False, True):
-        for reb in (1, 2, 4, 8, 12, 24):
-            for sm in (0.0, 2.0, 5.0):
-                for mw in (0.04, 0.08):
+        for reb in (4, 12, 24):
+            for sm in (0.0, 3.0):
+                for mw in (0.06,):
                     sc2 = StrategyConfig(label_horizon=args.horizon, rebalance_every=reb,
                                          max_weight=mw)
                     res, _ = P.backtest_scores(ds, score, sc2, "base", leverage=1.0,
-                                               factor_model=fm, smooth_halflife=sm)
+                                               factor_model=fm, smooth_halflife=sm,
+                                       estimated_spread=True,
+                                       exec_overrides={"no_trade_band": 0.008,
+                                                       "cost_penalty": 1.0})
                     res = P.trim_to_oos(res, score)
                     days = max((res.equity.index[-1] - res.equity.index[0]).days, 1)
                     rec = {

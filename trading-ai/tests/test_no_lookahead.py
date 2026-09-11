@@ -257,3 +257,20 @@ def test_cost_penalty_tilts_toward_cheap_names():
     wa = target_weights_factor(score, idio, L, live, base_cfg, cost_bps=cheap)
     wb = target_weights_factor(score, idio, L, live, pen_cfg, cost_bps=cheap)
     assert np.allclose(wa, wb, atol=1e-9)
+
+
+def test_kline_alias_normalisation_keeps_the_trade_count():
+    """Header-bearing archives call the trade count 'count'; it must survive."""
+    from tai.data.binance_vision import KLINE_ALIASES, KLINE_COLS
+    raw = pd.DataFrame({"open_time": [1], "open": [1.0], "high": [1.0], "low": [1.0],
+                        "close": [1.0], "volume": [1.0], "close_time": [2],
+                        "quote_volume": [1.0], "count": [7],
+                        "taker_buy_volume": [0.5], "taker_buy_quote_volume": [0.5],
+                        "ignore": [0]})
+    renamed = raw.rename(columns=KLINE_ALIASES)
+    keep = [c for c in KLINE_COLS if c in renamed.columns]
+    assert "trades" in keep
+    assert int(renamed["trades"].iloc[0]) == 7
+    # the headerless spelling is already canonical and must pass through unchanged
+    raw2 = raw.rename(columns={"count": "trades"})
+    assert "trades" in raw2.rename(columns=KLINE_ALIASES).columns

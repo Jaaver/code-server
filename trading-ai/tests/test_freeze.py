@@ -22,3 +22,16 @@ def test_roundtrip_and_tamper_detection(tmp_path):
     p.write_text(json.dumps(payload))
     with pytest.raises(ValueError, match="edited since freezing"):
         load_frozen(p)
+
+
+def test_refreezing_the_same_config_keeps_the_original_timestamp(tmp_path):
+    p = tmp_path / "frozen.json"
+    cfg = {"horizon": 4, "rebalance": 12}
+    first = freeze(cfg, p, note="dev")
+    second = freeze(cfg, p, note="dev rerun")
+    assert second["frozen_at"] == first["frozen_at"]
+    assert second["note"] == "dev"
+    # a genuinely different configuration does get a new stamp
+    third = freeze({**cfg, "rebalance": 24}, p, note="changed")
+    assert third["frozen_at"] != first["frozen_at"]
+    assert third["sha256_16"] != first["sha256_16"]

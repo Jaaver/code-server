@@ -20,9 +20,23 @@ def _digest(payload: dict) -> str:
 
 def freeze(config: dict, path: Path, *, dev_metrics: dict | None = None,
            note: str = "") -> dict:
+    """Write the configuration with its hash and the metrics that justified it.
+
+    Re-freezing an identical configuration keeps the original timestamp: the
+    protocol's claim is about *when the choice was made*, so re-running the
+    pipeline must not quietly move that date forward.
+    """
+    digest = _digest(config)
+    if path.exists():
+        try:
+            prev = json.loads(path.read_text())
+        except json.JSONDecodeError:
+            prev = None
+        if prev and prev.get("sha256_16") == digest:
+            return prev
     payload = {"config": config, "dev_metrics": dev_metrics or {}, "note": note,
-               "frozen_at": datetime.now(timezone.utc).isoformat()}
-    payload["sha256_16"] = _digest(payload["config"])
+               "frozen_at": datetime.now(timezone.utc).isoformat(),
+               "sha256_16": digest}
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, default=str))
     return payload

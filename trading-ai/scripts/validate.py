@@ -90,6 +90,10 @@ def main() -> int:
     ap.add_argument("--factor-model", action="store_true")
     ap.add_argument("--n-factors", type=int, default=5)
     ap.add_argument("--smooth-halflife", type=float, default=0.0)
+    ap.add_argument("--no-trade-band", type=float, default=0.0015)
+    ap.add_argument("--estimated-spread", action="store_true",
+                    help="charge the measured per-symbol spread instead of a constant")
+    ap.add_argument("--spread-method", default="measured", choices=("measured", "highlow"))
     ap.add_argument("--n-trials", type=int, default=40,
                     help="number of configurations searched, for the deflated Sharpe")
     args = ap.parse_args()
@@ -103,7 +107,10 @@ def main() -> int:
     ds = P.build_context(ucfg, scfg, max_date=args.max_date, min_date=args.min_date)
     log.info("context: %d bars, mean universe %.1f", len(ds.mask), ds.mask.sum(axis=1).mean())
     BT = {"factor_model": args.factor_model, "n_factors": args.n_factors,
-          "smooth_halflife": args.smooth_halflife}
+          "smooth_halflife": args.smooth_halflife,
+          "estimated_spread": args.estimated_spread,
+          "spread_method": args.spread_method}
+    BAND = {"no_trade_band": args.no_trade_band}
 
     out = {"scores": args.scores, "target_monthly": args.target_monthly}
     bpd = ds.bars_per_day
@@ -112,7 +119,8 @@ def main() -> int:
     base_curves = {}
     out["cost_sensitivity"] = {}
     for cname in COST_SCENARIOS:
-        res, _ = P.backtest_scores(ds, score, scfg, cname, leverage=1.0, **BT)
+        res, _ = P.backtest_scores(ds, score, scfg, cname, leverage=1.0,
+                                   exec_overrides=dict(BAND), **BT)
         res = P.trim_to_oos(res, score)
         s = M.summarise(res, bpd, n_trials=args.n_trials)
         out["cost_sensitivity"][cname] = s
@@ -133,7 +141,8 @@ def main() -> int:
     out["leverage_calibration"] = {}
     for cname in ("optimistic", "base", "conservative", "brutal"):
         log.info("solving leverage for cost=%s", cname)
-        sol = solve_leverage(ds, score, scfg, cname, args.target_monthly, bt_kwargs=BT)
+        sol = solve_leverage(ds, score, scfg, cname, args.target_monthly,
+                             exec_overrides=dict(BAND), bt_kwargs=BT)
         if sol is None:
             out["leverage_calibration"][cname] = {"reached": False}
             log.info("  target unreachable under cost=%s within leverage bound", cname)
@@ -165,7 +174,7 @@ def main() -> int:
     for aum in [float(x) for x in args.aums.split(",")]:
         res, _ = P.backtest_scores(
             ds, score, scfg, "base", leverage=lev_base,
-            exec_overrides={"init_equity": aum,
+            exec_overrides={**BAND, "init_equity": aum,
                             "max_gross": float(min(25.0, max(4.0, 3.0 * lev_base)))}, **BT)
         res = P.trim_to_oos(res, score)
         s = M.summarise(res, bpd, n_trials=args.n_trials)
@@ -181,7 +190,7 @@ def main() -> int:
     out["growth_frontier"] = []
     for gross_cap in (2, 4, 6, 8, 10, 12, 15, 20):
         res, _ = P.backtest_scores(ds, score, scfg, "base", leverage=50.0,
-                                   exec_overrides={"max_gross": float(gross_cap),
+                                   exec_overrides={**BAND, "max_gross": float(gross_cap),
                                                    "vol_scalar_bounds": (0.25, 50.0)},
                                    **BT)
         res = P.trim_to_oos(res, score)

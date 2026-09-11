@@ -71,6 +71,8 @@ def main() -> int:
     ap.add_argument("--leverages", default="1,2,4,6,8")
     ap.add_argument("--costs", default="base,conservative,optimistic,brutal")
     ap.add_argument("--save-scores", action="store_true")
+    ap.add_argument("--per-model", action="store_true",
+                    help="also save each ensemble member's out-of-sample predictions")
     ap.add_argument("--use-metrics", action="store_true",
                     help="include open-interest / positioning features")
     ap.add_argument("--factor-model", action="store_true",
@@ -96,6 +98,7 @@ def main() -> int:
     ds, ucfg, scfg = build(args)
 
     horizons = [int(h) for h in args.horizons.split(",") if h.strip()]
+    per_model = None
     if horizons:
         from tai.models.ensemble import cs_standardise
         parts = []
@@ -115,16 +118,22 @@ def main() -> int:
         score = cs_standardise(sum(p_.reindex(common) for p_ in parts) / len(parts))
         folds = _folds
     else:
-        (score, folds) = P.run_walkforward(ds, scfg, train_stride=args.train_stride,
-                                           sample_halflife_days=args.halflife_days)
-        if isinstance(score, tuple):
-            score = score[0]
+        res_wf, folds = P.run_walkforward(ds, scfg, train_stride=args.train_stride,
+                                          sample_halflife_days=args.halflife_days,
+                                          return_per_model=args.per_model)
+        if args.per_model:
+            score, per_model = res_wf
+        else:
+            score = res_wf[0] if isinstance(res_wf, tuple) else res_wf
+            per_model = None
     log.info("walk-forward done in %.1f min; %d OOS rows", (time.time() - t0) / 60, len(score))
 
     out_dir = RESULTS_DIR / args.tag
     out_dir.mkdir(parents=True, exist_ok=True)
     if args.save_scores:
         score.to_frame("score").to_parquet(out_dir / "oos_scores.parquet")
+    if per_model is not None:
+        per_model.to_parquet(out_dir / "oos_per_model.parquet")
 
     # ---- signal quality ------------------------------------------------- #
     fwd = ds.labels["fwd"].stack(future_stack=True)
@@ -136,7 +145,18 @@ def main() -> int:
     log.info("IC(raw fwd) %s", {k: round(v, 4) for k, v in ic_raw.items()})
     log.info("IC(residual) %s", {k: round(v, 4) for k, v in ic_res.items()})
 
+    if per_model is not None:
+        from tai.models.ensemble import cs_standardise
+        pm_ic = {}
+        for c in per_model.columns:
+            z = cs_standardise(per_model[c])
+            pm_ic[c] = M.information_coefficient(z, resid.reindex(z.index))
+            log.info("member %-10s IC=%.4f t=%.1f", c, pm_ic[c]["ic_mean"], pm_ic[c]["ic_ir"])
+    else:
+        pm_ic = {}
+
     report = {"args": vars(args), "ic_raw": ic_raw, "ic_residual": ic_res,
+              "ic_per_model": pm_ic,
               "n_oos_rows": int(len(score)),
               "oos_start": str(score.index.get_level_values(0).min()),
               "oos_end": str(score.index.get_level_values(0).max()),

@@ -83,6 +83,7 @@ def main() -> int:
     ap.add_argument("--diag-tag", default=None)
     ap.add_argument("--baselines-tag", default="baselines")
     ap.add_argument("--decay-tag", default="decay")
+    ap.add_argument("--by-year-tag", default="by_year")
     ap.add_argument("--enh-dev-tag", default="enh_dev")
     ap.add_argument("--enh-holdout-tag", default="enh_holdout")
     ap.add_argument("--forward-tag", default="forward")
@@ -99,10 +100,12 @@ def main() -> int:
     base = load(RESULTS_DIR / args.baselines_tag / "baselines.json")
     frozen = load(ROOT / "configs" / "frozen.json")
     decay = load(RESULTS_DIR / args.decay_tag / "decay.json")
+    by_year = load(RESULTS_DIR / args.by_year_tag / "by_year.json")
     enh_d = load(RESULTS_DIR / args.enh_dev_tag / "validation.json")
     enh_h = load(RESULTS_DIR / args.enh_holdout_tag / "validation.json")
 
-    payload = {"decay": decay, "enh_dev": enh_d, "enh_holdout": enh_h,
+    payload = {"decay": decay, "by_year": by_year,
+               "enh_dev": enh_d, "enh_holdout": enh_h,
                "dev": dev, "holdout": hold, "validation_dev": val,
                "validation_holdout": val_h, "diagnostics": diag, "baselines": base,
                "frozen": frozen, "target_monthly": args.target}
@@ -198,6 +201,24 @@ def main() -> int:
                     for r, v in diag["ic_by_vol_regime"].items()]
             A("\n### Stability by market-volatility regime\n")
             A(table(rows, ["regime", "IC", "t-stat"]))
+
+    if by_year:
+        A("\n## The full-sample Sharpe ratio is an average, and it hides a trend\n")
+        A("Every row below is out-of-sample: each prediction comes from an ensemble "
+          "fitted only on bars that preceded it. The book is run at a 20% volatility "
+          "target with no extra leverage.\n")
+        for cname, blk in by_year.items():
+            rows = [[y, num(v["sharpe"]), pct(v["geom_monthly"]), pct(v["total_return"], 1),
+                     pct(v["max_drawdown"], 1), num(v["daily_turnover"])]
+                    for y, v in blk["years"].items()]
+            A(f"\n**{cname} execution** (full sample Sharpe "
+              f"{num(blk['full_sample_sharpe'])})\n")
+            A(table(rows, ["year", "Sharpe", "monthly (geo)", "year return", "max DD",
+                           "turnover/day"]))
+        A("\nThe 2021 column is most of the full-sample result. It is also the year the "
+          "universe was smallest, the market least institutional, and short-horizon "
+          "cross-sectional reversal least competed-for. Whatever 2021 was, it is not the "
+          "market the strategy would be deployed into.\n")
 
     if decay:
         A("\n## Why the returns decayed while the prediction did not\n")

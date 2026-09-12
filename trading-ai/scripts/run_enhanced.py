@@ -55,6 +55,10 @@ def main() -> int:
     top_n = int(os.environ.get("TAI_ENH_TOPN", "150"))
     horizons = os.environ.get("TAI_ENH_HORIZONS", "4,12")
     use_metrics = os.environ.get("TAI_ENH_METRICS", "1") == "1"
+    # The development window's own IC-by-period table shows the edge decaying
+    # (0.129 in 2021H1 to 0.071 in 2025H1), so weighting recent bars more heavily is
+    # justified by development evidence alone, not by anything seen in the holdout.
+    halflife = os.environ.get("TAI_ENH_HALFLIFE", "540")
 
     scores = RESULTS_DIR / "enh" / "oos_scores.parquet"
     if not scores.exists():
@@ -66,7 +70,8 @@ def main() -> int:
                 "--leverages", "1", "--costs", "passive", "--save-scores",
                 "--factor-model", "--estimated-spread",
                 "--no-trade-band", str(frozen["no_trade_band"]),
-                "--cost-penalty", str(frozen.get("cost_penalty", 1.0))]
+                "--cost-penalty", str(frozen.get("cost_penalty", 1.0)),
+                "--halflife-days", halflife]
         if use_metrics:
             args.append("--use-metrics")
         if run("enh_wf", args) != 0:

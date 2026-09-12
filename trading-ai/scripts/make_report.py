@@ -100,11 +100,12 @@ def main() -> int:
     base = load(RESULTS_DIR / args.baselines_tag / "baselines.json")
     frozen = load(ROOT / "configs" / "frozen.json")
     decay = load(RESULTS_DIR / args.decay_tag / "decay.json")
+    facts = load(ROOT / "reports" / "data" / "dataset.json")
     by_year = load(RESULTS_DIR / args.by_year_tag / "by_year.json")
     enh_d = load(RESULTS_DIR / args.enh_dev_tag / "validation.json")
     enh_h = load(RESULTS_DIR / args.enh_holdout_tag / "validation.json")
 
-    payload = {"decay": decay, "by_year": by_year,
+    payload = {"facts": facts, "decay": decay, "by_year": by_year,
                "enh_dev": enh_d, "enh_holdout": enh_h,
                "dev": dev, "holdout": hold, "validation_dev": val,
                "validation_holdout": val_h, "diagnostics": diag, "baselines": base,
@@ -169,6 +170,24 @@ def main() -> int:
           "that does not involve leverage, and the reason the returns do not is that "
           "the edge per unit of turnover has compressed to the same order of magnitude "
           "as the fees.\n")
+
+    if facts:
+        A("\n## Data and method\n")
+        A(f"- {facts['venue']}, {facts['bar']} bars from {facts['source']}.\n"
+          f"- {facts['symbols_in_panel']} symbols, {facts['bars']:,} bars, "
+          f"{facts['panel_start'][:10]} to {facts['panel_end'][:10]}; "
+          f"{facts['metrics_symbols']} of them also carry the open-interest archive.\n"
+          f"- **{facts['oos_predictions']:,} out-of-sample predictions** from "
+          f"{facts['oos_start'][:10]} to {facts['oos_end'][:10]}, each produced by an "
+          f"ensemble retrained quarterly on bars that preceded it, with a purge and a "
+          f"48-bar embargo before every test window.\n"
+          f"- Transaction costs are not assumed: the effective spread was measured from "
+          f"the exchange's aggregated-trade archive across {facts['spread_samples']} "
+          f"symbol-days spanning the liquidity spectrum. Median half-spread "
+          f"**{num(facts['measured_half_spread_bps_median'])} bp** "
+          f"({num(facts['measured_half_spread_bps_p10'])} bp to "
+          f"{num(facts['measured_half_spread_bps_p90'])} bp, 10th to 90th percentile). "
+          f"Fees, not spread, dominate: the exchange charges 5 bp taker and 2 bp maker.\n")
 
     if dev:
         A("## Data and universe\n")
@@ -377,16 +396,36 @@ def main() -> int:
         A("```json\n" + json.dumps(frozen["config"], indent=2) + "\n```\n")
         A(f"Frozen at {frozen['frozen_at']} (hash `{frozen['sha256_16']}`).\n")
 
-    fwd = None
-    for p in sorted((RESULTS_DIR / args.forward_tag).glob("forward_*.json")) \
-            if (RESULTS_DIR / args.forward_tag).exists() else []:
-        fwd = json.loads(p.read_text())
+    fwd_dir = RESULTS_DIR / args.forward_tag
+    fwd_files = sorted(fwd_dir.glob("forward_*.json")) if fwd_dir.exists() else []
+    fwd_files = [f for f in fwd_files if "_corrected" not in f.name]
+    for fp in fwd_files:
+        fwd = json.loads(fp.read_text())
+        if "sharpe" not in fwd:
+            continue
         A("\n## Forward paper trading through the production code path\n")
-        A(f"`{p.name}`: Sharpe {num(fwd['sharpe'])}, geometric monthly "
-          f"{pct(fwd.get('geom_monthly'))}, annualised volatility "
-          f"{pct(fwd['ann_vol'], 1)}, max drawdown {pct(fwd['max_drawdown'], 1)}, "
-          f"average gross {num(fwd['avg_gross'], 1)}x, "
-          f"{fwd.get('n_months', 'n/a')} months.\n")
+        A("`scripts/paper_forward.py` replays the holdout one bar at a time through the "
+          "same `LiveStrategy` and broker objects a deployment would use, handing the "
+          "strategy only a rolling window of history. It is the strongest test available "
+          "short of sending real orders, and it is the one that would catch a backtest "
+          "quietly using information a live system could not have.\n")
+        A(f"- Window: {fwd.get('n_months', 'n/a')} months from the cutoff, "
+          f"{fwd.get('start_equity', 0):,.0f} of starting capital.\n"
+          f"- Net Sharpe **{num(fwd['sharpe'])}**, geometric monthly "
+          f"**{pct(fwd.get('geom_monthly'))}**, CAGR {pct(fwd.get('cagr'), 1)}, "
+          f"annualised volatility {pct(fwd.get('ann_vol'), 1)}, max drawdown "
+          f"{pct(fwd.get('max_drawdown'), 1)}, average gross "
+          f"{num(fwd.get('avg_gross'), 2)}x.\n"
+          f"- Of the starting capital, **{pct(fwd.get('total_costs', 0) / max(fwd.get('start_equity', 1), 1), 1)}** "
+          f"went to trading costs and "
+          f"**{pct(fwd.get('total_funding', 0) / max(fwd.get('start_equity', 1), 1), 1)}** "
+          f"to funding. That is the whole story of the holdout in two numbers: the gross "
+          f"signal is real and roughly that size.\n")
+        if fwd.get("return_series_reconciles") is not None:
+            A(f"- Return series reconciles with the equity curve: "
+              f"{fwd['return_series_reconciles']}.\n")
+        if fwd.get("note"):
+            A(f"- Note: {fwd['note']}.\n")
 
     Path(args.out).write_text("\n".join(md))
     print(f"wrote {args.out} ({len(''.join(md))} chars)")

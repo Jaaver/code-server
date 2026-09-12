@@ -8,11 +8,135 @@ All figures below are produced by the scripts in this repository and read direct
 
 1. **Arithmetic.** Compounding at 33% a month requires an annualised Sharpe of at least **2.616** at the growth-optimal leverage, no matter how much leverage is available.
 
-2. **Leverage is not free in practice.** On the development window the book nets Sharpe **3.30** under the headline execution assumption, which clears that bar on paper. But simulated on the actual return path with maintenance margin checked every bar, the best compound monthly return reachable without the account being liquidated is **12.58%**, and it costs a -80% drawdown. Past roughly 3x gross notional, more leverage lowers the compound return; past ~10x it ends the account.
+2. **Leverage is not free in practice.** On the development window the book nets Sharpe **3.30** under the headline execution assumption, which clears that bar on paper. But simulated on the actual return path with maintenance margin checked every bar, the best compound monthly return reachable without the account being liquidated is **12.58%**, and it costs a -80% drawdown. Beyond that point more leverage *lowers* the compound return, and beyond a gross-notional cap of about 10x it liquidates the account outright.
 
 3. **The sealed holdout.** Over the 14 months after the configuration was frozen, the same strategy nets Sharpe **0.55** and **0.77%** a month, with 50% of months positive and a deflated Sharpe of 0.025. That fails the failure criteria recorded in `PROTOCOL.md` before the holdout was opened.
 
 What the work does establish is a genuine, measurable edge and an honest measurement of its size. The signal survives out of sample on every metric that does not involve leverage, and the reason the returns do not is that the edge per unit of turnover has compressed to the same order of magnitude as the fees.
+
+
+## Data and method
+
+- Binance USD-margined perpetual futures, 1 hour bars from data.binance.vision (the exchange's public archive).
+- 829 symbols, 58,440 bars, 2020-01-01 to 2026-08-31; 130 of them also carry the open-interest archive.
+- **5,741,401 out-of-sample predictions** from 2021-02-01 to 2026-08-31, each produced by an ensemble retrained quarterly on bars that preceded it, with a purge and a 48-bar embargo before every test window.
+- Transaction costs are not assumed: the effective spread was measured from the exchange's aggregated-trade archive across 42 symbol-days spanning the liquidity spectrum. Median half-spread **1.08 bp** (0.16 bp to 2.79 bp, 10th to 90th percentile). Fees, not spread, dominate: the exchange charges 5 bp taker and 2 bp maker.
+
+
+### Signal decay
+
+| forward horizon (bars) | IC | t-stat | % cross-sections positive |
+|---|---|---|---|
+| 1 | 0.0733 | 105.7 | 70.7% |
+| 2 | 0.0825 | 116.9 | 72.6% |
+| 4 | 0.0880 | 123.3 | 73.9% |
+| 8 | 0.0902 | 126.5 | 74.1% |
+| 12 | 0.0903 | 126.5 | 74.3% |
+| 24 | 0.0839 | 119.3 | 73.3% |
+| 48 | 0.0738 | 105.7 | 70.8% |
+| 96 | 0.0710 | 104.6 | 70.5% |
+
+
+### Stability by year
+
+| year | IC | t-stat |
+|---|---|---|
+| 2021 | 0.1288 | 80.3 |
+| 2022 | 0.0944 | 67.6 |
+| 2023 | 0.0754 | 54.6 |
+| 2024 | 0.0653 | 44.7 |
+| 2025 | 0.0708 | 28.8 |
+
+
+### Stability by market-volatility regime
+
+| regime | IC | t-stat |
+|---|---|---|
+| low_vol | 0.0779 | 65.6 |
+| mid_vol | 0.0893 | 73.0 |
+| high_vol | 0.0961 | 75.0 |
+
+
+## The full-sample Sharpe ratio is an average, and it hides a trend
+
+Every row below is out-of-sample: each prediction comes from an ensemble fitted only on bars that preceded it. The book is run at a 20% volatility target with no extra leverage.
+
+
+**maker_only execution** (full sample Sharpe 3.24)
+
+| year | Sharpe | monthly (geo) | year return | max DD | turnover/day |
+|---|---|---|---|---|---|
+| 2021 | 9.68 | 19.28% | 595.4% | -14.0% | 2.17 |
+| 2022 | 3.71 | 6.59% | 115.0% | -13.8% | 3.23 |
+| 2023 | 1.66 | 2.79% | 39.1% | -8.6% | 3.61 |
+| 2024 | 1.42 | 2.33% | 31.9% | -26.5% | 2.90 |
+| 2025 | 2.30 | 3.88% | 57.9% | -15.4% | 2.08 |
+| 2026 | -0.28 | -0.68% | -5.3% | -20.6% | 0.90 |
+
+
+**passive execution** (full sample Sharpe 2.66)
+
+| year | Sharpe | monthly (geo) | year return | max DD | turnover/day |
+|---|---|---|---|---|---|
+| 2021 | 9.31 | 18.47% | 545.2% | -14.1% | 2.17 |
+| 2022 | 2.95 | 5.15% | 82.8% | -15.7% | 3.29 |
+| 2023 | 0.57 | 0.83% | 10.5% | -12.1% | 3.79 |
+| 2024 | 0.67 | 1.00% | 12.7% | -28.4% | 3.04 |
+| 2025 | 2.29 | 3.84% | 57.3% | -16.0% | 2.22 |
+| 2026 | -0.77 | -1.49% | -11.3% | -22.0% | 1.13 |
+
+
+**base execution** (full sample Sharpe 1.64)
+
+| year | Sharpe | monthly (geo) | year return | max DD | turnover/day |
+|---|---|---|---|---|---|
+| 2021 | 8.41 | 16.52% | 437.4% | -14.3% | 2.16 |
+| 2022 | 1.22 | 1.98% | 26.5% | -23.6% | 3.39 |
+| 2023 | -0.86 | -1.68% | -18.4% | -28.3% | 4.01 |
+| 2024 | -0.19 | -0.51% | -5.9% | -33.7% | 3.10 |
+| 2025 | 1.67 | 2.74% | 38.3% | -16.6% | 2.34 |
+| 2026 | -1.10 | -2.04% | -15.2% | -25.0% | 1.39 |
+
+
+The 2021 column is most of the full-sample result. It is also the year the universe was smallest, the market least institutional, and short-horizon cross-sectional reversal least competed-for. Whatever 2021 was, it is not the market the strategy would be deployed into.
+
+
+## Why the returns decayed while the prediction did not
+
+Rank information coefficient is a correlation, so it is scale-free: it can hold steady while the money drains out. What a dollar-neutral book actually earns is information coefficient multiplied by cross-sectional dispersion, and in a maturing market the dispersion falls. Both are below, per half-year, for the 12-hour horizon the strategy trades.
+
+| period | IC | t | top-minus-bottom decile | cross-sectional dispersion |
+|---|---|---|---|---|
+| 2021H1 | 0.1246 | 48.5 | 134.0 bp | 453 bp |
+| 2021H2 | 0.1177 | 56.8 | 57.2 bp | 355 bp |
+| 2022H1 | 0.0936 | 44.6 | 17.6 bp | 289 bp |
+| 2022H2 | 0.0882 | 46.0 | 30.0 bp | 224 bp |
+| 2023H1 | 0.0952 | 47.7 | 18.0 bp | 229 bp |
+| 2023H2 | 0.0706 | 36.0 | 10.3 bp | 258 bp |
+| 2024H1 | 0.0761 | 34.4 | 16.8 bp | 304 bp |
+| 2024H2 | 0.0640 | 32.6 | 9.6 bp | 297 bp |
+| 2025H1 | 0.0891 | 37.9 | 39.5 bp | 359 bp |
+| 2025H2 | 0.1099 | 49.3 | 13.9 bp | 459 bp |
+| 2026H1 | 0.0760 | 34.5 | 19.5 bp | 488 bp |
+| 2026H2 | 0.0863 | 21.3 | 96.4 bp | 478 bp |
+
+Against a round-trip cost of roughly 6 bp in the headline scenario, a decile spread of 70+ bp is a business and a spread in the low teens is not. The prediction is still there; the prize is not.
+
+
+## The bar: single-feature analytic baselines
+
+Each baseline is one line of signal logic run through the identical simulator and cost model.
+
+| baseline | IC | Sharpe | monthly (geo) | max DD | turnover/day |
+|---|---|---|---|---|---|
+| reversal_1h | 0.0320 | -3.64 | -6.92% | -97.9% | 5.42 |
+| reversal_4h | 0.0392 | -4.32 | -8.20% | -99.1% | 5.32 |
+| reversal_24h | 0.0377 | -2.52 | -4.89% | -94.9% | 3.59 |
+| reversal_72h | 0.0317 | -1.47 | -2.91% | -85.4% | 2.16 |
+| ofi_4h_reversal | 0.0123 | -6.64 | -10.86% | -99.8% | 6.01 |
+| ofi_4h_momentum | -0.0123 | -5.67 | -9.31% | -99.5% | 6.05 |
+| funding_carry | -0.0047 | -2.26 | -4.11% | -92.4% | 2.89 |
+| volume_shock_reversal | 0.0094 | -3.80 | -6.77% | -97.8% | 5.42 |
 
 
 ## Development: is the target reachable at all?
@@ -179,6 +303,19 @@ The gap between the closed form and the simulation is the price of fat tails: th
 - Probabilistic Sharpe ratio: **0.482**
 
 
+## A second attempt to raise the Sharpe ratio
+
+Because Sharpe is the binding constraint, a second research pass spent compute on the three things most likely to raise it: a wider universe (150 names instead of 120, since breadth raises the information ratio roughly as its square root), an ensemble over two label horizons rather than one, and an 18-month half-life on the training weights, justified by the decay visible in the development window alone.
+
+| execution | Sharpe dev (base model) | Sharpe dev (enhanced) | Sharpe holdout (base model) | Sharpe holdout (enhanced) |
+|---|---|---|---|---|
+| maker_only | 3.96 | 4.36 | 0.91 | 0.79 |
+| passive | 3.30 | 3.87 | 0.55 | 0.81 |
+| base | 2.12 | 2.90 | -0.04 | 0.33 |
+
+This is a second look at the holdout and therefore weaker evidence than the first; it is reported separately for that reason rather than folded into the headline.
+
+
 ## Frozen configuration
 
 ```json
@@ -206,3 +343,14 @@ The gap between the closed form and the simulation is the price of fat tails: th
 ```
 
 Frozen at 2026-09-11T17:46:37.848073+00:00 (hash `0cbdd224ad614a5a`).
+
+
+## Forward paper trading through the production code path
+
+`scripts/paper_forward.py` replays the holdout one bar at a time through the same `LiveStrategy` and broker objects a deployment would use, handing the strategy only a rolling window of history. It is the strongest test available short of sending real orders, and it is the one that would catch a backtest quietly using information a live system could not have.
+
+- Window: 6 months from the cutoff, 999,508 of starting capital.
+- Net Sharpe **-0.41**, geometric monthly **-0.89%**, CAGR -10.1%, annualised volatility 20.8%, max drawdown -20.1%, average gross 0.98x.
+- Of the starting capital, **14.1%** went to trading costs and **-7.5%** to funding. That is the whole story of the holdout in two numbers: the gross signal is real and roughly that size.
+
+- Note: recomputed from the equity curve; the first run reported a Sharpe ratio computed on a return series that excluded rebalance costs.

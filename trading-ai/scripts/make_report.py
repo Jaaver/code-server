@@ -118,6 +118,8 @@ def main() -> int:
     svgs = {}
     for tag, label in ((args.holdout_tag, "holdout"), (args.dev_tag, "dev")):
         p = RESULTS_DIR / tag / "equity_target.csv"
+        if not p.exists():
+            p = RESULTS_DIR / tag / "equity_unit_risk.csv"
         if p.exists():
             eq = pd.read_csv(p, index_col=0, parse_dates=True).iloc[:, 0]
             eq.index = pd.to_datetime(eq.index, utc=True)

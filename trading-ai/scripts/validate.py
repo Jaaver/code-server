@@ -133,6 +133,11 @@ def main() -> int:
         s = M.summarise(res, bpd, n_trials=args.n_trials)
         out["cost_sensitivity"][cname] = s
         base_curves[cname] = res.returns
+        if cname == args.headline_cost:
+            d = RESULTS_DIR / args.tag
+            d.mkdir(parents=True, exist_ok=True)
+            res.equity.to_csv(d / "equity_unit_risk.csv")
+            M.monthly_returns(res.equity).to_csv(d / "monthly_unit_risk.csv")
         log.info("cost=%-13s sharpe=%.2f monthly=%.2f%% dd=%.1f%% turn/day=%.2f cost_drag=%.1f%%",
                  cname, s["sharpe"], 100 * s["geom_monthly"], 100 * s["max_drawdown"],
                  s["daily_turnover"], 100 * s["total_cost_frac_of_initial"])

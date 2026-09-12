@@ -105,7 +105,17 @@ def main() -> int:
     enh_d = load(RESULTS_DIR / args.enh_dev_tag / "validation.json")
     enh_h = load(RESULTS_DIR / args.enh_holdout_tag / "validation.json")
 
-    payload = {"facts": facts, "decay": decay, "by_year": by_year,
+    fwd_dir0 = RESULTS_DIR / args.forward_tag
+    fwd0 = {}
+    if fwd_dir0.exists():
+        for f0 in sorted(fwd_dir0.glob("forward_*.json")):
+            if "_corrected" in f0.name:
+                continue
+            d0 = json.loads(f0.read_text())
+            if "sharpe" in d0:
+                fwd0 = d0
+                break
+    payload = {"facts": facts, "decay": decay, "by_year": by_year, "forward": fwd0,
                "enh_dev": enh_d, "enh_holdout": enh_h,
                "dev": dev, "holdout": hold, "validation_dev": val,
                "validation_holdout": val_h, "diagnostics": diag, "baselines": base,
@@ -365,6 +375,31 @@ def main() -> int:
               f"{v['pbo']['n_configs']} configurations): **{num(v['pbo']['value'], 3)}**\n"
               f"- Deflated Sharpe ratio: **{num(cs.get('dsr'), 3)}**\n"
               f"- Probabilistic Sharpe ratio: **{num(cs.get('psr'), 3)}**\n")
+
+    if dev_cs and hd_cs:
+        A("\n## Against the criteria recorded before the holdout was opened\n")
+        need = G.required_sharpe(args.target)
+        checks = [
+            ("Out-of-sample net Sharpe at or above 1.0", hd_cs["sharpe"] >= 1.0,
+             num(hd_cs["sharpe"])),
+            ("Probability of backtest overfitting at or below 0.50",
+             (val_h or {}).get("pbo", {}).get("value", 1.0) <= 0.5,
+             num((val_h or {}).get("pbo", {}).get("value"), 3)),
+            ("Deflated Sharpe at or above 0.95", (hd_cs.get("dsr") or 0) >= 0.95,
+             num(hd_cs.get("dsr"), 3)),
+            ("Holdout monthly at least a third of development, same leverage",
+             (hd_cs.get("geom_monthly") or -1) >= (dev_cs.get("geom_monthly") or 0) / 3,
+             f"{pct(hd_cs.get('geom_monthly'))} vs {pct(dev_cs.get('geom_monthly'))}"),
+            (f"{100 * args.target:.0f}%/month reachable at the headline assumption",
+             hd_cs["sharpe"] >= need,
+             f"needs {num(need)}, has {num(hd_cs['sharpe'])}"),
+        ]
+        rows = [[t, "**pass**" if ok else "**fail**", v] for t, ok, v in checks]
+        A(table(rows, ["criterion", "result", "value"]))
+        A(f"\n{sum(1 for _, ok, _ in checks if not ok)} of {len(checks)} failed. The "
+          f"criteria were written down in `reports/PROTOCOL.md` before the holdout "
+          f"period was evaluated, precisely so this verdict could not be renegotiated "
+          f"afterwards.\n")
 
     if enh_d and enh_h:
         A("\n## A second attempt to raise the Sharpe ratio\n")

@@ -303,6 +303,20 @@ The gap between the closed form and the simulation is the price of fat tails: th
 - Probabilistic Sharpe ratio: **0.482**
 
 
+## Against the criteria recorded before the holdout was opened
+
+| criterion | result | value |
+|---|---|---|
+| Out-of-sample net Sharpe at or above 1.0 | **fail** | 0.55 |
+| Probability of backtest overfitting at or below 0.50 | **pass** | 0.000 |
+| Deflated Sharpe at or above 0.95 | **fail** | 0.025 |
+| Holdout monthly at least a third of development, same leverage | **fail** | 0.77% vs 5.81% |
+| 33%/month reachable at the headline assumption | **fail** | needs 2.62, has 0.55 |
+
+
+4 of 5 failed. The criteria were written down in `reports/PROTOCOL.md` before the holdout period was evaluated, precisely so this verdict could not be renegotiated afterwards.
+
+
 ## A second attempt to raise the Sharpe ratio
 
 Because Sharpe is the binding constraint, a second research pass spent compute on the three things most likely to raise it: a wider universe (150 names instead of 120, since breadth raises the information ratio roughly as its square root), an ensemble over two label horizons rather than one, and an 18-month half-life on the training weights, justified by the decay visible in the development window alone.

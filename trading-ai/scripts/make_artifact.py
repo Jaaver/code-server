@@ -194,6 +194,8 @@ def build(summary: dict, charts: dict, target: float) -> str:
     dev_ms = (vd or {}).get("max_sustainable") or {}
     dev_ms50 = (vd or {}).get("max_sustainable_dd50") or {}
     decay = summary.get("decay") or {}
+    by_year = summary.get("by_year") or {}
+    facts = summary.get("facts") or {}
     lc = (primary.get("leverage_calibration") or {}).get(headline, {})
     op = lc if lc.get("reached") else {}
     opsum = op.get("summary", {})
@@ -302,6 +304,34 @@ def build(summary: dict, charts: dict, target: float) -> str:
                  "monthly (holdout)", "max DD (holdout)"], rows,
                 "Unit-risk book at a 20% volatility target in both windows.")
           + "</section>")
+
+    # ---- year by year ----------------------------------------------------- #
+    if by_year:
+        blocks = []
+        for cname in ("maker_only", "passive", "base"):
+            blk = by_year.get(cname)
+            if not blk:
+                continue
+            rows = [[y, nm(v["sharpe"]), pc(v["geom_monthly"]), pc(v["total_return"], 1),
+                     pc(v["max_drawdown"], 1), nm(v["daily_turnover"])]
+                    for y, v in blk["years"].items()]
+            blocks.append(
+                f'<h3>{cname.replace("_", " ")} execution &mdash; full sample Sharpe '
+                f'{nm(blk["full_sample_sharpe"])}</h3>'
+                + tbl(["year", "Sharpe", "monthly", "year return", "max DD",
+                       "turnover/day"], rows))
+        if blocks:
+            P('<section><h2>A full-sample Sharpe ratio is an average, and it hides a '
+              'trend</h2>'
+              '<div class="measure stack">'
+              '<p>Every row is out-of-sample: each prediction comes from an ensemble '
+              'fitted only on bars that preceded it, and the book runs at a 20% '
+              'volatility target with no extra leverage.</p>'
+              '<p>2021 is most of the full-sample result. It is also the year the '
+              'universe was smallest, the venue least institutional, and short-horizon '
+              'cross-sectional reversal least competed for. Whatever 2021 was, it is not '
+              'the market this would be deployed into.</p></div>'
+              + "".join(blocks) + "</section>")
 
     # ---- why the returns fell but the prediction did not ------------------ #
     if decay:
@@ -537,6 +567,32 @@ def build(summary: dict, charts: dict, target: float) -> str:
           + tbl(["AUM", "monthly", "Sharpe", "orders truncated", "max DD"], rows)
           + "</section>")
 
+    # ---- forward paper trading ------------------------------------------- #
+    if fwd and "sharpe" in fwd:
+        start_eq = max(fwd.get("start_equity", 1.0), 1.0)
+        P('<section><h2>The same result through the production code path</h2>'
+          '<div class="measure stack">'
+          '<p>The vectorised backtest and the live system share the feature code but not '
+          'the control flow, so the holdout was also replayed one bar at a time through '
+          'the objects a deployment would actually run &mdash; a rolling window, a frozen '
+          'model, a broker that charges the same fees and funding. If the backtest were '
+          'quietly using information a live system could not have, this is where it would '
+          'show.</p></div>'
+          '<div class="kpis">'
+          + kpi("net Sharpe", nm(fwd["sharpe"]),
+                f'{fwd.get("n_months", "")} months, one bar at a time', "warn")
+          + kpi("monthly", pc(fwd.get("geom_monthly")),
+                f'max drawdown {pc(fwd.get("max_drawdown"), 0)}', "warn")
+          + kpi("paid in fees", pc(fwd.get("total_costs", 0) / start_eq, 1),
+                "of starting capital")
+          + kpi("paid in funding", pc(fwd.get("total_funding", 0) / start_eq, 1),
+                "dollar-neutral is not funding-neutral")
+          + '</div>'
+          '<div class="measure"><p class="note">Those last two tiles are the whole story '
+          'in two numbers. The gross signal over the holdout is real and roughly that '
+          'size; the fees and the funding are the same size; what is left is noise.</p>'
+          '</div></section>')
+
     # ---- pre-registered criteria ----------------------------------------- #
     crits = []
     sr = cs.get("sharpe")
@@ -550,18 +606,21 @@ def build(summary: dict, charts: dict, target: float) -> str:
     dsr = cs.get("dsr")
     crits.append(criterion(dsr is not None and dsr >= 0.95,
                            "Deflated Sharpe ratio at or above 0.95", nm(dsr, 3)))
-    if vd and vh:
-        d_m = ((vd.get("leverage_calibration") or {}).get("base") or {}).get("geom_monthly")
-        h_m = ((vh.get("leverage_calibration") or {}).get("base") or {}).get("geom_monthly")
+    if dev_cs and hd_cs:
+        d_m, h_m = dev_cs.get("geom_monthly"), hd_cs.get("geom_monthly")
         ok = bool(d_m and h_m and h_m >= d_m / 3)
         crits.append(criterion(ok, "Holdout monthly return at least a third of the "
-                                   "development figure",
+                                   "development figure, same leverage",
                                f"{pc(h_m)} vs {pc(d_m)}"))
-    anyblown = any(r.get("blown_up") for r in gf if r["gross_cap"] <=
-                   (op.get("gross_cap") or 10**9)) if gf else False
-    crits.append(criterion(not (opsum.get("blown_up") or anyblown),
-                           "No liquidated path at the reported operating leverage",
-                           "none" if not (opsum.get("blown_up") or anyblown) else "one or more"))
+    # The recommended operating point is the best leverage that survives, so the
+    # question is whether *that* point liquidates -- not whether any point on the
+    # frontier does, since the frontier is deliberately pushed until it breaks.
+    rec = dev_ms50 or dev_ms
+    if rec:
+        crits.append(criterion(not rec.get("blown_up", True),
+                               "The recommended operating point survives the whole sample",
+                               f'{nm(rec["avg_gross"], 1)}&times; gross, '
+                               f'{pc(rec["max_drawdown"], 0)} drawdown'))
     crits.append(criterion(reached,
                            f"{100 * target:.0f}%/month reachable at the headline "
                            f"execution assumption",

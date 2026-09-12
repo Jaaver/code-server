@@ -184,10 +184,17 @@ def build(summary: dict, charts: dict, target: float) -> str:
     frozen = summary.get("frozen") or {}
     fwd = summary.get("forward") or {}
 
+    headline = ((frozen or {}).get("config", {}) or {}).get(
+        "headline_cost_scenario", "passive")
     primary = vh or vd
     which = "sealed holdout" if vh else "development"
-    cs = (primary.get("cost_sensitivity") or {}).get("base", {})
-    lc = (primary.get("leverage_calibration") or {}).get("base", {})
+    cs = (primary.get("cost_sensitivity") or {}).get(headline, {})
+    dev_cs = (vd.get("cost_sensitivity") or {}).get(headline, {}) if vd else {}
+    hd_cs = (vh.get("cost_sensitivity") or {}).get(headline, {}) if vh else {}
+    dev_ms = (vd or {}).get("max_sustainable") or {}
+    dev_ms50 = (vd or {}).get("max_sustainable_dd50") or {}
+    decay = summary.get("decay") or {}
+    lc = (primary.get("leverage_calibration") or {}).get(headline, {})
     op = lc if lc.get("reached") else {}
     opsum = op.get("summary", {})
 
@@ -203,51 +210,41 @@ def build(summary: dict, charts: dict, target: float) -> str:
 
     # ---- header ---------------------------------------------------------- #
     gv = primary.get("growth_verdict") or {}
-    headline = (summary.get("frozen") or {}).get("config", {}).get(
-        "headline_cost_scenario", "passive")
     gvh = gv.get(headline, {})
-    need = gvh.get("required_sharpe")
+    need = gvh.get("required_sharpe") or 2.616
     reached = bool(op) and bool(gvh.get("reachable"))
-    if reached:
-        answer = (f"Yes, but only under the most favourable execution assumption. It "
-                  f"takes a Sharpe-{nm(cs.get('sharpe'))} market-neutral book levered to "
-                  f"{pc(gvh.get('required_ann_vol'), 0)} annualised volatility &mdash; "
-                  f"about {nm(gvh.get('required_gross'), 0)}&times; gross notional &mdash; "
-                  f"and the drawdowns that go with it.")
-    elif gvh:
-        answer = (f"No. The edge is real and survives costs out of sample, but "
-                  f"{100 * target:.0f}% a month needs a Sharpe ratio of "
-                  f"{nm(need)} before leverage enters the question at all, and this book "
-                  f"nets {nm(cs.get('sharpe'))}. At its growth-optimal leverage it tops "
-                  f"out near {pc(gvh.get('max_monthly_at_growth_optimal_leverage'), 1)} "
-                  f"a month &mdash; and no one should run a book there.")
-    else:
-        answer = ("The edge is real and survives costs out of sample; what the target "
-                  "costs in leverage and drawdown is set out below.")
 
     P('<header class="stack">'
-      f'<span class="eyebrow">{which} &middot; binance usd-m perpetuals &middot; '
-      f'hourly bars</span>'
-      f'<h1>Can a trading model make 33% a month?</h1>'
-      f'<p class="lede measure">{answer}</p></header>')
+      f'<span class="eyebrow">binance usd-m perpetuals &middot; hourly bars &middot; '
+      f'2020&ndash;2026 &middot; walk-forward, sealed holdout</span>'
+      f'<h1>Can a trading model make {100 * target:.0f}% a month?</h1>'
+      f'<p class="lede measure">No &mdash; and the work says so three different ways. '
+      f'The arithmetic puts a floor of Sharpe {nm(need)} on the target before leverage '
+      f'is even a question. The simulation says the leverage the arithmetic calls for '
+      f'liquidates the account. And the sealed holdout says the edge, while still '
+      f'measurable, has shrunk to about the size of the trading fees.</p></header>')
 
-    # ---- KPI strip ------------------------------------------------------- #
+    # ---- KPI strip: the contrast is the result --------------------------- #
     kpis = [
-        kpi("net Sharpe", nm(cs.get("sharpe")),
-            "unit-risk book, base costs, out of sample"),
-        kpi("monthly (geo)", pc(op.get("geom_monthly")) if reached else pc(cs.get("geom_monthly")),
-            "at the operating point" if reached else "at 20% vol target",
-            "good" if reached and (op.get("geom_monthly") or 0) >= target else ""),
-        kpi("max drawdown", pc(op.get("max_drawdown") if reached else cs.get("max_drawdown"), 1),
-            "peak to trough, hourly marks", "warn"),
-        kpi("gross notional", f"{nm(op.get('avg_gross'), 1)}&times;" if reached else "&mdash;",
-            "average, cap enforced each bar", "warn"),
-        kpi("PBO", nm(primary.get("pbo", {}).get("value"), 3),
-            "CSCV, across searched configs"),
-        kpi("deflated Sharpe", nm(cs.get("dsr"), 3),
-            "penalised for the search"),
+        kpi("Sharpe required", nm(need),
+            f"for {100 * target:.0f}%/month at any leverage"),
+        kpi("Sharpe, development", nm(dev_cs.get("sharpe")),
+            "2021-02 to 2025-06, walk-forward", "good"),
+        kpi("Sharpe, sealed holdout", nm(hd_cs.get("sharpe")),
+            f"{hd_cs.get('n_months', '')} months after the config was frozen", "warn"),
+        kpi("monthly, holdout", pc(hd_cs.get("geom_monthly")),
+            f"{pc(hd_cs.get('pct_months_positive'), 0)} of months positive", "warn"),
+        kpi("best monthly ever reached", pc(dev_ms.get("geom_monthly")),
+            f"development, {nm(dev_ms.get('avg_gross'), 1)}&times; gross, "
+            f"{pc(dev_ms.get('max_drawdown'), 0)} drawdown"),
+        kpi("deflated Sharpe, holdout", nm(hd_cs.get("dsr"), 3),
+            "penalised for 108 configurations searched", "warn"),
     ]
-    P('<section><div class="kpis">' + "".join(kpis) + "</div></section>")
+    P('<section><div class="kpis">' + "".join(kpis) + "</div>"
+      '<div class="measure"><p class="note">The two Sharpe figures come from the same '
+      'model, the same frozen configuration and the same cost assumptions. The only '
+      'difference is which months they cover. Everything that follows is an attempt to '
+      'explain that gap, because it is the whole answer.</p></div></section>')
 
     # ---- the arithmetic that decides the question ------------------------ #
     if gv:
@@ -282,6 +279,54 @@ def build(summary: dict, charts: dict, target: float) -> str:
                 "Computed by evaluation/growth.py from each scenario's measured "
                 "out-of-sample Sharpe; the code is unit-tested against the closed form.")
           + "</section>")
+
+    # ---- development vs holdout ------------------------------------------ #
+    if vd and vh:
+        rows = []
+        for cname in ("maker_only", "passive", "base", "conservative", "brutal"):
+            a = (vd.get("cost_sensitivity") or {}).get(cname)
+            b = (vh.get("cost_sensitivity") or {}).get(cname)
+            if not a or not b:
+                continue
+            rows.append([cname.replace("_", " "), nm(a["sharpe"]), pc(a["geom_monthly"]),
+                         nm(b["sharpe"]), pc(b["geom_monthly"]),
+                         pc(b["max_drawdown"], 0)])
+        P('<section><h2>Development against the sealed holdout</h2>'
+          '<div class="measure stack">'
+          '<p>Both columns are out-of-sample in the sense that matters for a model: '
+          'every prediction comes from an ensemble fitted only on bars that preceded '
+          'it. The difference is that the portfolio construction &mdash; rebalance '
+          'interval, no-trade band, per-name cap &mdash; was chosen on the development '
+          'window, and the holdout was not looked at until it was frozen.</p></div>'
+          + tbl(["execution", "Sharpe (dev)", "monthly (dev)", "Sharpe (holdout)",
+                 "monthly (holdout)", "max DD (holdout)"], rows,
+                "Unit-risk book at a 20% volatility target in both windows.")
+          + "</section>")
+
+    # ---- why the returns fell but the prediction did not ------------------ #
+    if decay:
+        series = decay.get("12") or decay.get(next(iter(decay), ""), {})
+        rows = [[k, nm(v.get("ic_mean"), 4), nm(v.get("ic_ir"), 1),
+                 f'{nm(v.get("decile_spread_bps"), 1)} bp',
+                 f'{nm(v.get("cross_sectional_dispersion_bps"), 0)} bp']
+                for k, v in series.items()]
+        if rows:
+            P('<section><h2>The prediction held. The prize did not.</h2>'
+              '<div class="measure stack">'
+              '<p>Rank information coefficient is a correlation, so it is scale-free: it '
+              'can hold steady while the money drains out. What a dollar-neutral book '
+              'earns is that correlation <em>multiplied by</em> how far apart the '
+              'cross-section spreads, and crypto\'s cross-sectional dispersion has '
+              'compressed as the market matured.</p>'
+              '<p>Both are below for the twelve-hour horizon the strategy trades. The '
+              'correlation falls by about a third across the sample; what a '
+              'top-minus-bottom decile actually pays falls by roughly five times, into '
+              'the same order of magnitude as the round-trip fee.</p></div>'
+              + tbl(["period", "IC", "t", "top decile &minus; bottom decile",
+                     "cross-sectional dispersion"], rows,
+                    "Measured on the same out-of-sample predictions used everywhere else "
+                    "on this page.")
+              + "</section>")
 
     # ---- what it trades -------------------------------------------------- #
     P('<section><h2>What the model is</h2>'

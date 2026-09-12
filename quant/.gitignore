@@ -1,3 +1,5 @@
 data/
-results/*.csv
+results/weights_*.parquet
+results/sleeve_returns_*.csv
+results/alpha_returns_*.csv
 __pycache__/

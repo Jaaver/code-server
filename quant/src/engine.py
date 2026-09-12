@@ -21,7 +21,8 @@ MAKER_FEE = 2.0e-4      # 0.020%
 # --- microstructure defaults ---
 MIN_HALF_SPREAD = 0.5e-4   # 0.5 bp floor: not even BTC is tighter round-trip
 MAX_HALF_SPREAD = 50e-4    # 50 bp cap on the estimator's tail
-IMPACT_COEF = 1.0          # Almgren square-root law coefficient
+IMPACT_ETA = 0.5           # Almgren temporary-impact coefficient
+IMPACT_EXP = 0.6           # Almgren exponent on participation
 
 
 def abdi_ranaldo_half_spread(high, low, close, window=48):
@@ -47,12 +48,45 @@ def abdi_ranaldo_half_spread(high, low, close, window=48):
     return half
 
 
+def tick_half_spread(close, ticks, spread_in_ticks=2.0, floor_bp=0.1, cap_bp=40.0):
+    """Half-spread from each symbol's measured tick size.
+
+    Abdi-Ranaldo on hourly bars conflates volatility with spread: it puts BTC's
+    mean half-spread at ~4.7bp when the instrument's whole tick is 0.15bp. The
+    exchange tick is directly measurable from the price series and bounds the
+    spread from below, so we model spread as a small multiple of it (2 ticks is
+    conservative for a liquid perp) and let the impact term carry size effects.
+    """
+    t = np.asarray(ticks, dtype=np.float64)[None, :]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        hs = 0.5 * spread_in_ticks * t / close
+    hs = np.nan_to_num(hs, nan=floor_bp * 1e-4, posinf=cap_bp * 1e-4)
+    return np.clip(hs, floor_bp * 1e-4, cap_bp * 1e-4)
+
+
+def measure_ticks(close):
+    """Smallest genuine price increment per symbol, from observed closes."""
+    out = np.full(close.shape[1], np.nan)
+    for j in range(close.shape[1]):
+        c = close[:, j]
+        c = c[np.isfinite(c)]
+        if len(c) < 500:
+            continue
+        d = np.abs(np.diff(c))
+        d = d[d > 0]
+        if len(d) < 100:
+            continue
+        out[j] = np.percentile(d, 0.5)
+    med = np.nanmedian(out)
+    return np.where(np.isfinite(out), out, med if np.isfinite(med) else 1e-6)
+
+
 class Backtester:
     def __init__(self, op, hi, lo, cl, dv, funding,
                  fee=TAKER_FEE, maker_frac=0.0,
-                 impact_coef=IMPACT_COEF, capital=1_000_000.0,
+                 impact_coef=IMPACT_ETA, capital=1_000_000.0,
                  max_gross_leverage=3.0, maint_margin=0.005,
-                 max_participation=0.05, half_spread=None):
+                 max_participation=0.05, half_spread=None, rebalance_band=0.0):
         """All panels are (T x N) float arrays aligned on the same hourly grid.
 
         dv        : quote (USD) volume traded in that bar
@@ -70,15 +104,31 @@ class Backtester:
         self.max_gross = max_gross_leverage
         self.maint = maint_margin
         self.max_part = max_participation
+        # Do not trade a name until its weight has drifted more than this
+        # fraction of equity from target. Without it the book is forced to
+        # re-true every position every bar purely because prices moved, which
+        # is turnover a real desk would never pay.
+        self.rebalance_band = rebalance_band
         self.T, self.N = cl.shape
 
-        self.hs = abdi_ranaldo_half_spread(hi, lo, cl) if half_spread is None else half_spread
+        if half_spread is None:
+            # tick-grounded, not Abdi-Ranaldo: see tick_half_spread for why
+            self.ticks = measure_ticks(cl)
+            self.hs = tick_half_spread(cl, self.ticks)
+        else:
+            self.hs = half_spread
         # per-bar volatility, used for the impact term
         with np.errstate(invalid="ignore", divide="ignore"):
             r = np.diff(np.log(cl), axis=0)
         r = np.vstack([np.full((1, self.N), np.nan), r])
         self.bar_vol = _rolling_std(r, 168)
-        self.valid = np.isfinite(op) & np.isfinite(cl) & (self.dv > 0)
+        # A bar with no volume means we cannot TRADE the symbol, not that we must
+        # exit it. Conflating the two force-closes and reopens every position in
+        # any quiet hour, which manufactures enormous turnover and destroys the
+        # holding-period return. Keep the two concepts separate:
+        self.priced = np.isfinite(op) & np.isfinite(cl)      # can hold and mark
+        self.tradable = self.priced & (self.dv > 0)          # can adjust
+        self.valid = self.priced
 
     def run(self, target_w, verbose=False):
         """target_w[t] = desired weight (fraction of equity) for the position held
@@ -97,7 +147,8 @@ class Backtester:
 
         for t in range(1, T):
             o, c = op[t], cl[t]
-            ok = self.valid[t]
+            ok = self.priced[t]
+            can_trade = self.tradable[t]
 
             # --- 1. PnL from close(t-1) to open(t) on the OLD position (gap risk) ---
             gap = np.where(np.isfinite(prev_cl) & ok, o - np.nan_to_num(prev_cl), 0.0)
@@ -106,13 +157,20 @@ class Backtester:
             if eq <= 0:
                 liquidated_at = t; equity[t:] = 0.0; break
 
-            # --- 2. Rebalance at open(t) ---
-            w = np.nan_to_num(target_w[t]) * ok
+            # --- 2. Rebalance at open(t), only where the symbol actually trades ---
+            w = np.nan_to_num(target_w[t]) * can_trade
             gross = np.abs(w).sum()
             if gross > self.max_gross:                    # enforce leverage cap
                 w *= self.max_gross / gross
-            tgt_units = np.where(o > 0, w * eq / np.where(o > 0, o, 1.0), 0.0)
-            d_units = tgt_units - units
+            # where we cannot trade, we simply keep what we already hold
+            tgt_units = np.where(can_trade & (o > 0), w * eq / np.where(o > 0, o, 1.0), units)
+            d_units = np.where(can_trade, tgt_units - units, 0.0)
+
+            if self.rebalance_band > 0:
+                drift = np.abs(d_units) * o / max(eq, 1e-9)
+                # always allow a full exit, otherwise require meaningful drift
+                keep = (drift < self.rebalance_band) & (np.abs(tgt_units) > 0)
+                d_units = np.where(keep, 0.0, d_units)
 
             # liquidity cap: cannot trade more than max_part of the bar's volume
             cap_units = np.where(o > 0, self.max_part * self.dv[t] / np.where(o > 0, o, 1.0), 0.0)
@@ -122,10 +180,17 @@ class Backtester:
             trade_notional = np.abs(d_units) * o
             tot_trade = trade_notional.sum()
             if tot_trade > 0:
-                part = np.divide(trade_notional, self.dv[t],
-                                 out=np.zeros(N), where=self.dv[t] > 0)
-                vol = np.nan_to_num(self.bar_vol[t], nan=0.02)
-                slip = self.hs[t] + self.impact_coef * vol * np.sqrt(np.clip(part, 0, 1))
+                # Almgren temporary impact on DAILY-equivalent quantities:
+                #   impact = eta * sigma_daily * (Q / ADV_daily)^0.6
+                # The plain per-bar square-root form charged ~8bp for trading
+                # 0.03% of a day's volume, which is an order that in practice
+                # crosses the touch and pays little beyond the spread.
+                adv_daily = self.dv[t] * 24.0
+                part = np.divide(trade_notional, adv_daily,
+                                 out=np.zeros(N), where=adv_daily > 0)
+                vol_daily = np.nan_to_num(self.bar_vol[t], nan=0.02) * np.sqrt(24.0)
+                slip = self.hs[t] + self.impact_coef * vol_daily * np.power(
+                    np.clip(part, 0, 1), IMPACT_EXP)
                 cost = float((trade_notional * (self.fee + slip)).sum())
                 eq -= cost
                 costs_t[t] = cost
@@ -150,8 +215,8 @@ class Backtester:
                 equity[t] = max(eq, 0.0); equity[t + 1:] = max(eq, 0.0)
                 break
 
-            # symbols that stop trading (delisting/halt) are force-closed at their
-            # last valid price, and we pay the exit cost like any other trade
+            # only a symbol that stops being PRICED at all (delisting) is force-closed,
+            # at its last valid price, paying the exit cost like any other trade
             dead = (~ok) & (units != 0)
             if dead.any():
                 exit_notional = np.abs(units * np.nan_to_num(prev_cl)) * dead

@@ -10,14 +10,43 @@ import numpy as np, pandas as pd
 VOL_FLOOR = 1e-4
 
 
-def tradable_mask(panels, min_dollar_vol=2e6, vol_window=24, min_history=24 * 30):
-    """Liquidity + listing filter, computed only from past data."""
+def tradable_mask(panels, min_dollar_vol=2e6, vol_window=24 * 7, min_history=24 * 30,
+                  hysteresis=0.5):
+    """Liquidity + listing filter, computed only from past data.
+
+    Two details matter more than the threshold itself:
+      * a 7-day ADV window, not 24h, so a quiet day does not eject a symbol;
+      * hysteresis - a symbol enters at min_dollar_vol but is only dropped below
+        hysteresis*min_dollar_vol. Without it, names sitting near the threshold
+        flip in and out and each flip forces a full round trip. That churn, not
+        the signal, was dominating turnover.
+    """
     dv = panels["quote_volume"]
-    adv = dv.rolling(vol_window, min_periods=vol_window // 2).mean()
-    liquid = adv >= min_dollar_vol
+    adv = dv.rolling(vol_window, min_periods=vol_window // 4).mean()
+    enter = (adv >= min_dollar_vol).to_numpy()
+    stay = (adv >= min_dollar_vol * hysteresis).to_numpy()
+    state = np.zeros(enter.shape, dtype=bool)
+    cur = np.zeros(enter.shape[1], dtype=bool)
+    for t in range(enter.shape[0]):
+        cur = np.where(cur, stay[t], enter[t])
+        state[t] = cur
+    liquid = pd.DataFrame(state, index=dv.index, columns=dv.columns)
     seasoned = panels["close"].notna().cumsum() >= min_history
-    priced = panels["close"].notna() & panels["open"].notna() & (dv > 0)
+    priced = panels["close"].notna() & panels["open"].notna()
     return liquid & seasoned & priced
+
+
+def rebalance_schedule(W, every):
+    """Hold weights constant between scheduled rebalances.
+
+    A book with a multi-day signal horizon does not need to be re-sized every
+    hour; doing so pays the spread repeatedly for noise.
+    """
+    if every <= 1:
+        return W
+    keep = np.zeros(len(W), dtype=bool)
+    keep[::every] = True
+    return W.where(pd.Series(keep, index=W.index), np.nan).ffill().fillna(0.0)
 
 
 def build_weights(score, mask, panels,

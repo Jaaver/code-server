@@ -11,12 +11,29 @@ os.makedirs(RES, exist_ok=True)
 YEAR = 24 * 365
 
 
+def screen_universe(panels, floor_dv=2e6, min_bars=24 * 30):
+    """Drop symbols whose rolling dollar volume NEVER reaches a loose floor.
+
+    The trading mask requires a strictly higher ADV than this floor, so these
+    symbols could never be held: removing them cannot change any position, it
+    only removes dead weight (and most of the peak memory).
+    """
+    adv = panels["quote_volume"].rolling(24, min_periods=12).mean()
+    ever = (adv >= floor_dv).sum(axis=0) >= min_bars
+    keep = list(ever[ever].index)
+    print(f"universe screen: {len(keep)} of {panels['close'].shape[1]} symbols "
+          f"ever reach ${floor_dv:,.0f} ADV", flush=True)
+    return {k: v[keep] for k, v in panels.items()}
+
+
 def build(panels, args):
     mask = portfolio.tradable_mask(panels, min_dollar_vol=args.min_dv)
     fwd = np.log(panels["close"]).diff().shift(-1)
-    scores = strategy.alpha_panel(panels, alphas.ALPHAS)
-    # standardise every alpha cross-sectionally so the blend is scale-free
-    scores = {k: alphas.zscore_xs(v.where(mask)) for k, v in scores.items()}
+    # standardise each alpha cross-sectionally (scale-free blend) and cast to
+    # float32 as it is produced, so 25 panels stay resident without thrashing
+    scores = strategy.alpha_panel(
+        panels, alphas.ALPHAS,
+        post=lambda v: alphas.zscore_xs(v.where(mask)).astype(np.float32))
 
     ic_ew, ic_raw = strategy.rolling_ic(scores, fwd, mask, halflife_days=args.ic_halflife)
     # LAG the IC weights: weights used for bar t may only know ICs through t-1.
@@ -83,8 +100,10 @@ def main():
     args = ap.parse_args()
 
     panels = dataset.load()
+    print(f"panel {panels['close'].shape}  "
+          f"{panels['close'].index.min()} -> {panels['close'].index.max()}", flush=True)
+    panels = screen_universe(panels)
     idx = panels["close"].index
-    print(f"panel {panels['close'].shape}  {idx.min()} -> {idx.max()}")
 
     mask, scores, comb, wts, ic_raw, ic_ew = build(panels, args)
     print(f"avg tradable/bar: {mask.sum(axis=1).mean():.1f}")

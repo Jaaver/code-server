@@ -7,14 +7,24 @@ ever uses is out-of-sample.
 import numpy as np, pandas as pd
 
 
-def alpha_panel(panels, alpha_defs):
-    """Compute every alpha once; returns {name: DataFrame}."""
+def alpha_panel(panels, alpha_defs, post=None):
+    """Compute every alpha once; returns {name: DataFrame}.
+
+    `post` is applied immediately so each alpha can be cast down to float32 and
+    its float64 rolling intermediates collected before the next one is built.
+    """
+    import gc, time
     out = {}
-    for name, fn in alpha_defs.items():
+    for i, (name, fn) in enumerate(alpha_defs.items(), 1):
+        t0 = time.time()
         try:
-            out[name] = fn(panels)
+            v = fn(panels)
+            out[name] = post(v) if post is not None else v
+            del v
+            gc.collect()
+            print(f"  [{i}/{len(alpha_defs)}] {name} {time.time()-t0:.1f}s", flush=True)
         except Exception as e:
-            print(f"  alpha {name} failed: {e}")
+            print(f"  [{i}/{len(alpha_defs)}] {name} FAILED: {e}", flush=True)
     return out
 
 
@@ -25,9 +35,12 @@ def rolling_ic(scores, fwd, mask, halflife_days=60):
     information strictly up to t.
     """
     from portfolio import information_coefficient
+    import time
     ics = {}
-    for name, sc in scores.items():
+    for i, (name, sc) in enumerate(scores.items(), 1):
+        t0 = time.time()
         ics[name] = information_coefficient(sc, fwd, mask)
+        print(f"  IC [{i}/{len(scores)}] {name} {time.time()-t0:.1f}s", flush=True)
     ic = pd.DataFrame(ics)
     hl = int(halflife_days * 24)
     return ic.ewm(halflife=hl, min_periods=hl // 2).mean(), ic
@@ -40,9 +53,7 @@ def combine(scores, ic_ew, shrink=0.25, min_abs_ic=0.0):
     equal-weight, which is what keeps the blend from chasing the last regime.
     """
     names = [n for n in scores if n in ic_ew.columns]
-    A = np.stack([scores[n].to_numpy(dtype=np.float32) for n in names])   # (K,T,N)
-    W = ic_ew[names].to_numpy(dtype=np.float32)                            # (T,K)
-    W = np.nan_to_num(W)
+    W = np.nan_to_num(ic_ew[names].to_numpy(dtype=np.float32))             # (T,K)
     if min_abs_ic > 0:
         W = np.where(np.abs(W) < min_abs_ic, 0.0, W)
     # shrink toward the equal-weight (sign-aware) prior
@@ -51,7 +62,14 @@ def combine(scores, ic_ew, shrink=0.25, min_abs_ic=0.0):
     Wn = np.divide(W, denom, out=np.zeros_like(W), where=denom > 0)
     eqd = np.abs(eq).sum(axis=1, keepdims=True)
     eqn = np.divide(eq, eqd, out=np.zeros_like(eq), where=eqd > 0)
-    Wf = (1 - shrink) * Wn + shrink * eqn                                  # (T,K)
-    comb = np.einsum("ktn,tk->tn", A, Wf.astype(np.float32))
+    Wf = ((1 - shrink) * Wn + shrink * eqn).astype(np.float32)             # (T,K)
+
+    # Accumulate the blend one alpha at a time. Stacking all K score panels
+    # first would double peak memory (a second full copy of every alpha).
     idx = scores[names[0]].index; cols = scores[names[0]].columns
-    return pd.DataFrame(comb, index=idx, columns=cols), pd.DataFrame(Wf, index=idx, columns=names)
+    comb = np.zeros((len(idx), len(cols)), dtype=np.float32)
+    for k, n in enumerate(names):
+        a = scores[n].to_numpy(dtype=np.float32)
+        np.add(comb, np.nan_to_num(a) * Wf[:, k][:, None], out=comb)
+    return (pd.DataFrame(comb, index=idx, columns=cols),
+            pd.DataFrame(Wf, index=idx, columns=names))

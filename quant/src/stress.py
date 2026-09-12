@@ -37,7 +37,7 @@ def main():
     ap.add_argument("--n_trials", type=int, default=60)
     args = ap.parse_args()
 
-    panels = dataset.load()
+    panels = run_wf.screen_universe(dataset.load())
     idx = panels["close"].index
     mask, scores, comb, wts, ic_raw, ic_ew = run_wf.build(panels, args)
 

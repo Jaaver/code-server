@@ -7,8 +7,24 @@ answer one question honestly:
 > **Can a trading model deliver 33% per month under realistic conditions — and at
 > what risk?**
 
-The answer this repository produces, with the evidence behind it, is in
-[`reports/RESULTS.md`](reports/RESULTS.md).
+**The answer is no, and the evidence is in [`reports/RESULTS.md`](reports/RESULTS.md).**
+Three independent arguments, each sufficient on its own:
+
+1. **Arithmetic.** 33%/month requires an annualised Sharpe of at least **2.616** at the
+   growth-optimal leverage, whatever leverage the venue allows.
+2. **Leverage is not free.** On the development window the book nets Sharpe 3.30, which
+   clears that bar on paper. Simulated on the actual return path with maintenance margin
+   checked every bar, the best compound monthly return reachable without liquidation is
+   **12.6%**, at an 80% drawdown; beyond ~10x gross notional the account is closed out.
+3. **The sealed holdout.** Over the 14 months after the configuration was frozen, the
+   same strategy nets Sharpe **0.55** and **0.77%/month** — 4 of the 6 failure criteria
+   recorded in [`reports/PROTOCOL.md`](reports/PROTOCOL.md) before the holdout was opened.
+
+What the work does establish is a genuine, measured edge and an honest measurement of its
+size: rank IC **0.086** across 48,907 out-of-sample cross-sections, positive in 73% of
+them, still intact in the holdout. What decayed is not the prediction but the prize — the
+top-minus-bottom decile spread fell from ~77 bp in 2021 to ~13 bp, which is the same order
+of magnitude as the round-trip fee.
 
 The question turns out to be arithmetic before it is empirical. A book run at
 annualised volatility *s* with annualised Sharpe *S* compounds at

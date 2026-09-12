@@ -48,13 +48,15 @@ CSS = """
 body{background:var(--ground);color:var(--ink);font-family:var(--sans);
   font-size:16px;line-height:1.62;-webkit-font-smoothing:antialiased;margin:0}
 .page{max-width:1040px;margin:0 auto;padding-inline:20px;padding-block:40px 72px;
-  display:flex;flex-direction:column;gap:44px}
+  display:flex;flex-direction:column;gap:52px}
 .measure{max-width:68ch}
 h1,h2,h3{font-family:var(--serif);font-weight:600;text-wrap:balance;margin:0;
   letter-spacing:-0.012em}
 h1{font-size:clamp(2rem,4.6vw,2.9rem);line-height:1.12}
-h2{font-size:clamp(1.35rem,2.4vw,1.7rem);line-height:1.2}
-h3{font-size:1.08rem;line-height:1.3}
+h2{font-size:clamp(1.35rem,2.4vw,1.72rem);line-height:1.2;padding-top:22px;
+  border-top:1px solid var(--edge)}
+section:first-of-type h2{border-top:0;padding-top:0}
+h3{font-size:1rem;line-height:1.3;color:var(--ink-2);margin-top:10px}
 p{margin:0}
 .eyebrow{font-family:var(--mono);font-size:.69rem;letter-spacing:.16em;
   text-transform:uppercase;color:var(--ink-3)}
@@ -67,18 +69,21 @@ hr.rule{border:0;border-top:1px solid var(--edge);margin:0}
   padding:24px;display:flex;flex-direction:column;gap:20px}
 .verdict .answer{font-family:var(--serif);font-size:clamp(1.25rem,2.6vw,1.6rem);
   line-height:1.3;text-wrap:balance}
-.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:1px;
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(158px,1fr));gap:1px;
   background:var(--edge);border:1px solid var(--edge);border-radius:3px;overflow:hidden}
 .kpi{background:var(--surface);padding:14px 16px;display:flex;flex-direction:column;gap:3px}
 .kpi .k{font-family:var(--mono);font-size:.66rem;letter-spacing:.1em;
   text-transform:uppercase;color:var(--ink-3)}
-.kpi .v{font-family:var(--mono);font-size:1.32rem;font-variant-numeric:tabular-nums;
-  letter-spacing:-0.02em}
+.kpi .v{font-family:var(--mono);font-size:1.42rem;font-variant-numeric:tabular-nums;
+  letter-spacing:-0.02em;line-height:1.15}
+.kpi.hero{padding:18px 16px}
+.kpi.hero .v{font-size:2.15rem}
+.kpi.hero .k{color:var(--ink-2)}
 .kpi .n{font-size:.78rem;color:var(--ink-3);line-height:1.35}
 .kpi.warn .v{color:var(--amber)}
 .kpi.good .v{color:var(--pos)}
 
-table{width:100%;border-collapse:collapse;font-size:.87rem;
+table{width:100%;border-collapse:collapse;font-size:.84rem;
   font-variant-numeric:tabular-nums}
 .tw{overflow-x:auto;border:1px solid var(--edge);border-radius:3px;background:var(--surface)}
 th,td{padding:8px 12px;text-align:right;white-space:nowrap;border-top:1px solid var(--edge)}
@@ -231,9 +236,10 @@ def build(summary: dict, charts: dict, target: float) -> str:
         kpi("Sharpe required", nm(need),
             f"for {100 * target:.0f}%/month at any leverage"),
         kpi("Sharpe, development", nm(dev_cs.get("sharpe")),
-            "2021-02 to 2025-06, walk-forward", "good"),
+            "2021-02 to 2025-06, walk-forward", "good hero"),
         kpi("Sharpe, sealed holdout", nm(hd_cs.get("sharpe")),
-            f"{hd_cs.get('n_months', '')} months after the config was frozen", "warn"),
+            f"{hd_cs.get('n_months', '')} months after the config was frozen",
+            "warn hero"),
         kpi("monthly, holdout", pc(hd_cs.get("geom_monthly")),
             f"{pc(hd_cs.get('pct_months_positive'), 0)} of months positive", "warn"),
         kpi("best monthly ever reached", pc(dev_ms.get("geom_monthly")),

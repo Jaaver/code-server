@@ -97,14 +97,21 @@ def main() -> int:
     out = RESULTS_DIR / args.tag
     out.mkdir(parents=True, exist_ok=True)
     df.to_csv(out / f"forward_{args.cost}_lev{args.leverage:g}.csv")
+    # Derive every statistic from the equity curve rather than from the recorded
+    # per-bar return, so a bookkeeping slip in the return series cannot produce a
+    # Sharpe ratio that disagrees with the money.
+    eq = df["equity"]
+    r = eq.pct_change().fillna(0.0)
     stats = {
-        "sharpe": M.sharpe(df["ret"], 24), "cagr": M.cagr(df["equity"]),
-        "max_drawdown": M.max_drawdown(df["equity"]),
-        "ann_vol": float(df["ret"].std() * np.sqrt(24 * 365)),
+        "sharpe": M.sharpe(r, 24), "cagr": M.cagr(eq),
+        "max_drawdown": M.max_drawdown(eq),
+        "ann_vol": float(r.std() * np.sqrt(24 * 365)),
         "avg_gross": float(df["gross"].mean()),
         "total_costs": broker.total_costs, "total_funding": broker.total_funding,
-        "final_equity": float(df["equity"].iloc[-1]),
-        **M.monthly_stats(df["equity"]),
+        "start_equity": float(eq.iloc[0]), "final_equity": float(eq.iloc[-1]),
+        "return_series_reconciles": bool(
+            abs(float((1.0 + df["ret"]).prod()) - float(eq.iloc[-1] / eq.iloc[0])) < 2e-3),
+        **M.monthly_stats(eq),
     }
     (out / f"forward_{args.cost}_lev{args.leverage:g}.json").write_text(
         json.dumps(stats, indent=2, default=str))

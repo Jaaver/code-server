@@ -188,15 +188,20 @@ def run_forward(window_provider, strategy: LiveStrategy, broker: PaperBroker,
     rows = []
     prev_prices: dict[str, float] = {}
     prev_equity = broker.equity
+    pending_ret: float | None = None
     for i, ts in enumerate(timestamps):
         ctx = window_provider(ts)
         if ctx is None:
             continue
+        # Feed the volatility targeter the *previous* bar's completed return, before
+        # this bar's rebalance changes the scale.  Observing a return that has not yet
+        # been charged its trading costs would report a gross-of-cost Sharpe ratio
+        # while the equity curve quietly compounds the net one.
+        if pending_ret is not None:
+            vol_targeter.observe(pending_ret)
         prices = ctx["next_open"]
         broker.mark(prices, prev_prices or prices)
         broker.settle_funding(prices, ctx.get("funding", {}))
-        ret = broker.equity / max(prev_equity, EPS) - 1.0
-        vol_targeter.observe(ret)
         if i % rebalance_every == 0 and broker.equity > 0:
             sc, mask, aux = strategy.score_window(ctx["window"])
             if not sc.empty:
@@ -204,6 +209,8 @@ def run_forward(window_provider, strategy: LiveStrategy, broker: PaperBroker,
                 vol_targeter.last_scale = vs * leverage
                 tw = strategy.target_weights(sc, aux, mask, vs, leverage)
                 broker.rebalance(ts, tw, prices, ctx.get("next_volume", {}))
+        ret = broker.equity / max(prev_equity, EPS) - 1.0
+        pending_ret = ret
         rows.append({"ts": ts, "equity": broker.equity, "gross": broker.gross(prices),
                      "ret": ret})
         prev_prices = {k: v for k, v in prices.items() if np.isfinite(v)}

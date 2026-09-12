@@ -94,3 +94,56 @@ def test_vol_targeter_is_scale_invariant():
         vt.observe(r)
     # realised unit vol is 40%, target 20% -> scalar 0.5
     assert abs(vt.scalar() - 0.5) < 0.06
+
+
+def test_forward_returns_reconcile_with_the_equity_curve():
+    """A forward run's return series must compound to its own equity curve.
+
+    The first version computed the bar return before charging the rebalance's costs,
+    so the reported Sharpe ratio was gross of cost while the equity curve compounded
+    the net one -- a 15-percentage-point discrepancy over six months.
+    """
+    from tai.live.paper_trader import run_forward
+
+    idx = pd.date_range("2024-01-01", periods=400, freq="1h", tz="UTC")
+    syms = ["A", "B", "C", "D"]
+    rng = np.random.default_rng(5)
+    px = pd.DataFrame(100 * np.exp(np.cumsum(rng.normal(0, 0.004, (len(idx), 4)), axis=0)),
+                      index=idx, columns=syms)
+    dv = {s: 1e12 for s in syms}
+
+    class _Provider:
+        def __call__(self, ts):
+            i = idx.get_loc(ts)
+            if i + 1 >= len(idx):
+                return None
+            nxt = idx[i + 1]
+            return {"window": None,
+                    "next_open": {s: float(px.loc[nxt, s]) for s in syms},
+                    "next_volume": dv, "funding": {}}
+
+    class _Strat:
+        exec_cfg = ExecConfig()
+
+        def score_window(self, window):
+            # alternate the sign so the book actually trades every rebalance
+            _Strat.flip = not getattr(_Strat, "flip", False)
+            sgn = 1.0 if _Strat.flip else -1.0
+            return (pd.Series([sgn, -sgn, sgn, -sgn], index=syms), None, None)
+
+        def target_weights(self, scores, aux, mask, vol_scalar, leverage):
+            return {s: float(v) * 0.25 for s, v in scores.items()}
+
+    cost = CostModel(taker_fee_bps=10.0, maker_fee_bps=10.0, maker_ratio=0.0,
+                     half_spread_bps=0.0, impact_coef=0.0)
+    cfg = ExecConfig(no_trade_band=0.0, max_participation=1.0)
+    broker = PaperBroker(cost=cost, cfg=cfg, equity=1_000_000.0)
+    vt = VolTargeter(0.20, 24 * 30, 24)
+    df = run_forward(_Provider(), _Strat(), broker, list(idx[:-1]),
+                     rebalance_every=4, leverage=1.0, vol_targeter=vt, log_every=0)
+
+    assert broker.total_costs > 0, "the test must actually incur costs"
+    implied = float((1.0 + df["ret"]).prod())
+    actual = float(df["equity"].iloc[-1] / 1_000_000.0)
+    assert abs(implied - actual) < 2e-3, (
+        f"return series compounds to {implied:.5f} but equity says {actual:.5f}")

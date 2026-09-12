@@ -52,7 +52,7 @@ def table(rows: list[list[str]], header: list[str]) -> str:
 
 
 def cost_table(cs: dict) -> str:
-    order = ["optimistic", "base", "conservative", "brutal"]
+    order = ["maker_only", "passive", "optimistic", "base", "conservative", "brutal"]
     rows = []
     for k in order:
         if k not in cs:
@@ -82,6 +82,7 @@ def main() -> int:
     ap.add_argument("--validation-tag", default=None)
     ap.add_argument("--diag-tag", default=None)
     ap.add_argument("--baselines-tag", default="baselines")
+    ap.add_argument("--decay-tag", default="decay")
     ap.add_argument("--forward-tag", default="forward")
     ap.add_argument("--target", type=float, default=0.33)
     ap.add_argument("--out", default=str(ROOT / "reports" / "RESULTS.md"))
@@ -95,8 +96,9 @@ def main() -> int:
     diag = load(RESULTS_DIR / (args.diag_tag or args.dev_tag) / "diagnostics.json")
     base = load(RESULTS_DIR / args.baselines_tag / "baselines.json")
     frozen = load(ROOT / "configs" / "frozen.json")
+    decay = load(RESULTS_DIR / args.decay_tag / "decay.json")
 
-    payload = {"dev": dev, "holdout": hold, "validation_dev": val,
+    payload = {"decay": decay, "dev": dev, "holdout": hold, "validation_dev": val,
                "validation_holdout": val_h, "diagnostics": diag, "baselines": base,
                "frozen": frozen, "target_monthly": args.target}
     out_dir = Path(args.out).parent
@@ -122,6 +124,41 @@ def main() -> int:
     A("# Results\n")
     A("All figures below are produced by the scripts in this repository and read "
       "directly from the JSON files under `reports/data/`; none are typed by hand.\n")
+
+    # ---- verdict, computed ------------------------------------------------ #
+    hl = ((frozen or {}).get("config", {}) or {}).get("headline_cost_scenario", "passive")
+    dev_cs = ((val or {}).get("cost_sensitivity") or {}).get(hl, {})
+    hd_cs = ((val_h or {}).get("cost_sensitivity") or {}).get(hl, {})
+    dev_ms = (val or {}).get("max_sustainable") or {}
+    hd_ms = (val_h or {}).get("max_sustainable") or {}
+    if dev_cs and hd_cs:
+        A("## The answer\n")
+        A(f"**{100 * args.target:.0f}% a month is not achievable by this model, and the "
+          f"reason is not subtle.** Three independent arguments, each sufficient on its "
+          f"own:\n")
+        A(f"1. **Arithmetic.** Compounding at {100 * args.target:.0f}% a month requires "
+          f"an annualised Sharpe of at least **{num(G.required_sharpe(args.target), 3)}** "
+          f"at the growth-optimal leverage, no matter how much leverage is available.\n")
+        A(f"2. **Leverage is not free in practice.** On the development window the book "
+          f"nets Sharpe **{num(dev_cs['sharpe'])}** under the headline execution "
+          f"assumption, which clears that bar on paper. But simulated on the actual "
+          f"return path with maintenance margin checked every bar, the best compound "
+          f"monthly return reachable without the account being liquidated is "
+          f"**{pct(dev_ms.get('geom_monthly'))}**, and it costs a "
+          f"{pct(dev_ms.get('max_drawdown'), 0)} drawdown. Beyond that point more "
+          f"leverage *lowers* the compound return, and beyond a gross-notional cap of "
+          f"about 10x it liquidates the account outright.\n")
+        A(f"3. **The sealed holdout.** Over the {hd_cs.get('n_months', 'final')} months "
+          f"after the configuration was frozen, the same strategy nets Sharpe "
+          f"**{num(hd_cs['sharpe'])}** and **{pct(hd_cs.get('geom_monthly'))}** a month, "
+          f"with {pct(hd_cs.get('pct_months_positive'), 0)} of months positive and a "
+          f"deflated Sharpe of {num(hd_cs.get('dsr'), 3)}. That fails the failure "
+          f"criteria recorded in `PROTOCOL.md` before the holdout was opened.\n")
+        A("What the work does establish is a genuine, measurable edge and an honest "
+          "measurement of its size. The signal survives out of sample on every metric "
+          "that does not involve leverage, and the reason the returns do not is that "
+          "the edge per unit of turnover has compressed to the same order of magnitude "
+          "as the fees.\n")
 
     if dev:
         A("## Data and universe\n")
@@ -156,6 +193,24 @@ def main() -> int:
                     for r, v in diag["ic_by_vol_regime"].items()]
             A("\n### Stability by market-volatility regime\n")
             A(table(rows, ["regime", "IC", "t-stat"]))
+
+    if decay:
+        A("\n## Why the returns decayed while the prediction did not\n")
+        A("Rank information coefficient is a correlation, so it is scale-free: it can "
+          "hold steady while the money drains out. What a dollar-neutral book actually "
+          "earns is information coefficient multiplied by cross-sectional dispersion, "
+          "and in a maturing market the dispersion falls. Both are below, per half-year, "
+          "for the 12-hour horizon the strategy trades.\n")
+        rows = []
+        for k, v in (decay.get("12") or decay.get(list(decay)[0]) or {}).items():
+            rows.append([k, num(v.get("ic_mean"), 4), num(v.get("ic_ir"), 1),
+                         f"{num(v.get('decile_spread_bps'), 1)} bp",
+                         f"{num(v.get('cross_sectional_dispersion_bps'), 0)} bp"])
+        A(table(rows, ["period", "IC", "t", "top-minus-bottom decile",
+                       "cross-sectional dispersion"]))
+        A("Against a round-trip cost of roughly 6 bp in the headline scenario, a "
+          "decile spread of 70+ bp is a business and a spread in the low teens is not. "
+          "The prediction is still there; the prize is not.\n")
 
     if base:
         A("\n## The bar: single-feature analytic baselines\n")

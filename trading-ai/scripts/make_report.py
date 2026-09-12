@@ -83,6 +83,8 @@ def main() -> int:
     ap.add_argument("--diag-tag", default=None)
     ap.add_argument("--baselines-tag", default="baselines")
     ap.add_argument("--decay-tag", default="decay")
+    ap.add_argument("--enh-dev-tag", default="enh_dev")
+    ap.add_argument("--enh-holdout-tag", default="enh_holdout")
     ap.add_argument("--forward-tag", default="forward")
     ap.add_argument("--target", type=float, default=0.33)
     ap.add_argument("--out", default=str(ROOT / "reports" / "RESULTS.md"))
@@ -97,8 +99,11 @@ def main() -> int:
     base = load(RESULTS_DIR / args.baselines_tag / "baselines.json")
     frozen = load(ROOT / "configs" / "frozen.json")
     decay = load(RESULTS_DIR / args.decay_tag / "decay.json")
+    enh_d = load(RESULTS_DIR / args.enh_dev_tag / "validation.json")
+    enh_h = load(RESULTS_DIR / args.enh_holdout_tag / "validation.json")
 
-    payload = {"decay": decay, "dev": dev, "holdout": hold, "validation_dev": val,
+    payload = {"decay": decay, "enh_dev": enh_d, "enh_holdout": enh_h,
+               "dev": dev, "holdout": hold, "validation_dev": val,
                "validation_holdout": val_h, "diagnostics": diag, "baselines": base,
                "frozen": frozen, "target_monthly": args.target}
     out_dir = Path(args.out).parent
@@ -318,6 +323,31 @@ def main() -> int:
               f"{v['pbo']['n_configs']} configurations): **{num(v['pbo']['value'], 3)}**\n"
               f"- Deflated Sharpe ratio: **{num(cs.get('dsr'), 3)}**\n"
               f"- Probabilistic Sharpe ratio: **{num(cs.get('psr'), 3)}**\n")
+
+    if enh_d and enh_h:
+        A("\n## A second attempt to raise the Sharpe ratio\n")
+        A("Because Sharpe is the binding constraint, a second research pass spent "
+          "compute on the three things most likely to raise it: a wider universe (150 "
+          "names instead of 120, since breadth raises the information ratio roughly as "
+          "its square root), an ensemble over two label horizons rather than one, and an "
+          "18-month half-life on the training weights, justified by the decay visible "
+          "in the development window alone.\n")
+        rows = []
+        for cname in ("maker_only", "passive", "base"):
+            a = (val or {}).get("cost_sensitivity", {}).get(cname)
+            b = (enh_d or {}).get("cost_sensitivity", {}).get(cname)
+            c = (val_h or {}).get("cost_sensitivity", {}).get(cname)
+            e = (enh_h or {}).get("cost_sensitivity", {}).get(cname)
+            if not all((a, b, c, e)):
+                continue
+            rows.append([cname, num(a["sharpe"]), num(b["sharpe"]),
+                         num(c["sharpe"]), num(e["sharpe"])])
+        A(table(rows, ["execution", "Sharpe dev (base model)",
+                       "Sharpe dev (enhanced)", "Sharpe holdout (base model)",
+                       "Sharpe holdout (enhanced)"]))
+        A("This is a second look at the holdout and therefore weaker evidence than the "
+          "first; it is reported separately for that reason rather than folded into the "
+          "headline.\n")
 
     if frozen:
         A("\n## Frozen configuration\n")

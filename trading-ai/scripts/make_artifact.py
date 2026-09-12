@@ -391,6 +391,36 @@ def build(summary: dict, charts: dict, target: float) -> str:
                  "outcome"], rows)
           + "</section>")
 
+    # ---- the empirical ceiling ------------------------------------------- #
+    ms = primary.get("max_sustainable")
+    ms50 = primary.get("max_sustainable_dd50")
+    if ms:
+        P('<section><h2>The ceiling the simulation actually reaches</h2>'
+          '<div class="measure stack">'
+          '<p>The closed form above is an upper bound that assumes independent '
+          'lognormal increments. Run on the real return path, with margin and '
+          'bankruptcy checked every bar, leverage stops paying well before the '
+          'arithmetic says it should &mdash; and then it stops paying abruptly.</p>'
+          '</div>'
+          '<div class="kpis">'
+          + kpi("best monthly, no liquidation", pc(ms["geom_monthly"]),
+                f'{nm(ms["avg_gross"], 1)}&times; gross, '
+                f'{pc(ms["ann_vol"], 0)} vol, {pc(ms["max_drawdown"], 0)} drawdown',
+                "warn")
+          + (kpi("best monthly, drawdown under 50%", pc(ms50["geom_monthly"]),
+                 f'{nm(ms50["avg_gross"], 1)}&times; gross, '
+                 f'{pc(ms50["ann_vol"], 0)} vol, {pc(ms50["max_drawdown"], 0)} drawdown',
+                 "good") if ms50 else "")
+          + kpi(f"{100 * target:.0f}%/month", "not reached",
+                "the leverage the arithmetic calls for liquidates the book", "")
+          + '</div>'
+          '<div class="measure"><p class="note">The gap between the two is the price of '
+          'fat tails. The growth formula treats each hour as an independent draw; a real '
+          'crypto return stream clusters its worst hours together, so the drawdown that '
+          'arrives at high leverage is deeper than lognormal maths predicts &mdash; deep '
+          'enough to cross the maintenance-margin line, at which point the position is '
+          'closed for you and the compounding argument ends.</p></div></section>')
+
     # ---- charts ---------------------------------------------------------- #
     key = "holdout" if "holdout_equity" in charts else "dev"
     if f"{key}_equity" in charts:

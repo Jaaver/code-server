@@ -67,12 +67,12 @@ def cost_table(cs: dict) -> str:
 
 
 def frontier_table(fr: list) -> str:
-    rows = [[f['gross_cap'], num(r['avg_gross']), pct(r['ann_vol'], 0),
-             pct(r['geom_monthly']), num(r['sharpe']), pct(r['max_drawdown'], 1),
-             "yes" if r['blown_up'] else "no"]
-            for f, r in ((x, x) for x in fr)]
+    rows = [[f"{r['gross_cap']}x", num(r["avg_gross"]), pct(r["ann_vol"], 0),
+             pct(r["geom_monthly"]), num(r["sharpe"]), pct(r["max_drawdown"], 1),
+             "**liquidated**" if r["blown_up"] else "survived"]
+            for r in fr]
     return table(rows, ["gross cap", "avg gross", "ann vol", "monthly (geo)", "Sharpe",
-                        "max DD", "liquidated"])
+                        "max DD", "outcome"])
 
 
 def main() -> int:
@@ -204,6 +204,25 @@ def main() -> int:
               "volatility per unit of gross notional, so the achievable growth rate is "
               "set by the gross-notional limit, not by the volatility target.\n")
             A(frontier_table(v["growth_frontier"]))
+        ms, ms50 = v.get("max_sustainable"), v.get("max_sustainable_dd50")
+        if ms:
+            A(f"\n### {label}: the empirical ceiling\n")
+            A(f"The closed form above is an upper bound that assumes lognormal "
+              f"returns. Simulated on the actual return path, the best compound "
+              f"monthly return reachable **without liquidating the account** is "
+              f"**{pct(ms['geom_monthly'])}**, at {num(ms['avg_gross'], 1)}x average "
+              f"gross notional and {pct(ms['ann_vol'], 0)} annualised volatility, with "
+              f"a {pct(ms['max_drawdown'], 1)} peak-to-trough drawdown.\n")
+            if ms50:
+                A(f"Holding the drawdown under 50% instead, the ceiling is "
+                  f"**{pct(ms50['geom_monthly'])}** a month at "
+                  f"{num(ms50['avg_gross'], 1)}x gross "
+                  f"({pct(ms50['ann_vol'], 0)} volatility, "
+                  f"{pct(ms50['max_drawdown'], 1)} drawdown, Sharpe "
+                  f"{num(ms50['sharpe'])}).\n")
+            A("The gap between the closed form and the simulation is the price of fat "
+              "tails: the growth formula assumes independent lognormal increments, and "
+              "a real crypto return stream clusters its worst hours together.\n")
         lc = v.get("leverage_calibration", {})
         if lc:
             A(f"\n### {label}: leverage required for {100 * args.target:.0f}% per month\n")

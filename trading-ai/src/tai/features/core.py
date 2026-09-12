@@ -313,11 +313,18 @@ def build_features_chunked(panel: dict[str, pd.DataFrame], mask: pd.DataFrame,
         if data is None:
             names = list(F.keys())
             data = np.empty((n_rows_total, len(names)), dtype="float32")
+        elif list(F.keys()) != names:
+            # Silently reindexing here once dropped every open-interest feature,
+            # because the first chunk predates the metrics archive and so defined a
+            # narrower schema than later chunks.  Fail loudly instead.
+            missing = set(F) - set(names)
+            extra = set(names) - set(F)
+            raise RuntimeError(
+                f"feature schema changed at chunk {ci + 1}: +{sorted(missing)} "
+                f"-{sorted(extra)}; every chunk must produce the same columns")
         block = stack_features(F, keep_mask)
         k = len(block)
         if k:
-            if list(block.columns) != names:
-                block = block[names]
             data[filled:filled + k] = block.to_numpy(dtype="float32")
             # store UTC instants as naive datetime64 and re-attach UTC at the end;
             # .to_numpy() on a tz-aware index warns about exactly this conversion
@@ -399,25 +406,23 @@ def add_metrics_features(F: dict[str, pd.DataFrame], metrics: dict[str, pd.DataF
     oiv = al(metrics.get("sum_open_interest_value", pd.DataFrame()))
     qv = panel["quote_volume"].reindex(index=idx, columns=cols).astype("float32")
 
-    if not oi.dropna(how="all").empty:
-        loi = np.log(oi.where(oi > 0))
-        for k in (1, 4, 12, 24, 72, 168):
-            d = (loi - loi.shift(k)).astype("float32")
-            F[f"oi_chg_{k}"] = (d / (vol_ref * np.sqrt(k) + EPS)).clip(-15, 15).astype("float32")
-        F["oi_chg_z"] = _zs(loi.diff(24), 24 * 30)
-        # positioning direction: OI rising with price = new longs, a crowding signal
-        r24 = np.log(panel["close"] / panel["close"].shift(24)).reindex(
-            index=idx, columns=cols).astype("float32")
-        F["oi_x_ret_24"] = (F["oi_chg_24"] * np.sign(r24)).clip(-15, 15).astype("float32")
-        F["oi_x_ret_4"] = (F["oi_chg_4"] * np.sign(
-            np.log(panel["close"] / panel["close"].shift(4)).reindex(
-                index=idx, columns=cols))).clip(-15, 15).astype("float32")
+    loi = np.log(oi.where(oi > 0))
+    for k in (1, 4, 12, 24, 72, 168):
+        d = (loi - loi.shift(k)).astype("float32")
+        F[f"oi_chg_{k}"] = (d / (vol_ref * np.sqrt(k) + EPS)).clip(-15, 15).astype("float32")
+    F["oi_chg_z"] = _zs(loi.diff(24), 24 * 30)
+    # positioning direction: OI rising with price = new longs, a crowding signal
+    r24 = np.log(panel["close"] / panel["close"].shift(24)).reindex(
+        index=idx, columns=cols).astype("float32")
+    F["oi_x_ret_24"] = (F["oi_chg_24"] * np.sign(r24)).clip(-15, 15).astype("float32")
+    F["oi_x_ret_4"] = (F["oi_chg_4"] * np.sign(
+        np.log(panel["close"] / panel["close"].shift(4)).reindex(
+            index=idx, columns=cols))).clip(-15, 15).astype("float32")
 
-    if not oiv.dropna(how="all").empty:
-        # leverage intensity: open interest relative to the flow that has to unwind it
-        ratio = (oiv / (qv.rolling(24, min_periods=8).mean() * 24 + EPS)).astype("float32")
-        F["oi_over_adv"] = np.log1p(ratio.clip(0, 500)).astype("float32")
-        F["oi_over_adv_z"] = _zs(F["oi_over_adv"], 24 * 30)
+    # leverage intensity: open interest relative to the flow that has to unwind it
+    ratio = (oiv / (qv.rolling(24, min_periods=8).mean() * 24 + EPS)).astype("float32")
+    F["oi_over_adv"] = np.log1p(ratio.clip(0, 500)).astype("float32")
+    F["oi_over_adv_z"] = _zs(F["oi_over_adv"], 24 * 30)
 
     ls_retail = al(metrics.get("count_long_short_ratio", pd.DataFrame()))
     ls_top_acct = al(metrics.get("count_toptrader_long_short_ratio", pd.DataFrame()))
@@ -426,22 +431,18 @@ def add_metrics_features(F: dict[str, pd.DataFrame], metrics: dict[str, pd.DataF
 
     for name, df in (("ls_retail", ls_retail), ("ls_top_acct", ls_top_acct),
                      ("ls_top_pos", ls_top_pos), ("taker_ls", taker_ls)):
-        if df.dropna(how="all").empty:
-            continue
         lg = np.log(df.where(df > 0)).astype("float32")
         F[name] = lg.clip(-3, 3)
         F[f"{name}_z"] = _zs(lg, 24 * 30)
         F[f"{name}_chg_24"] = (lg - lg.shift(24)).clip(-3, 3).astype("float32")
 
-    if not ls_retail.dropna(how="all").empty and not ls_top_pos.dropna(how="all").empty:
-        # large accounts positioned against the crowd is the classic setup
-        F["ls_top_minus_retail"] = (np.log(ls_top_pos.where(ls_top_pos > 0))
-                                    - np.log(ls_retail.where(ls_retail > 0))
-                                    ).clip(-3, 3).astype("float32")
-        F["ls_top_minus_retail_z"] = _zs(F["ls_top_minus_retail"], 24 * 30)
+    # large accounts positioned against the crowd is the classic setup
+    F["ls_top_minus_retail"] = (np.log(ls_top_pos.where(ls_top_pos > 0))
+                                - np.log(ls_retail.where(ls_retail > 0))
+                                ).clip(-3, 3).astype("float32")
+    F["ls_top_minus_retail_z"] = _zs(F["ls_top_minus_retail"], 24 * 30)
 
-    for k in [c for c in ("oi_chg_24", "oi_chg_4", "oi_over_adv", "ls_retail_z",
-                          "ls_top_minus_retail", "taker_ls_z", "oi_x_ret_24")
-              if c in F]:
+    for k in ("oi_chg_24", "oi_chg_4", "oi_over_adv", "ls_retail_z",
+              "ls_top_minus_retail", "taker_ls_z", "oi_x_ret_24"):
         F[f"cs_{k}"] = _cs_rank(F[k], mask)
     return F

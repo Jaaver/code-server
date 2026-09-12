@@ -50,3 +50,20 @@ def test_aux_panels_match_feature_builder():
         b = aux[k].to_numpy(dtype="float64")
         both = np.isfinite(a) & np.isfinite(b)
         assert np.allclose(a[both], b[both], rtol=1e-5, atol=1e-8), k
+
+
+def test_chunked_aux_has_the_same_keys_as_aux_panels():
+    """Downstream stages read aux['ret'] and aux['mkt_ret']; a narrower dict here
+    surfaces as a KeyError two stages later, after an hour of training."""
+    panel = _synth_panel(n_bars=4000, n_sym=8, seed=9)
+    cfg = UniverseConfig(top_n=8, min_adv_usd=0.0, adv_lookback_days=10,
+                         listing_burn_bars=24)
+    mask = pit_universe(panel, cfg, 24)
+    _, aux_chunk = build_features_chunked(panel, mask, 24, chunk=1500, warmup=2600,
+                                         log_progress=False)
+    aux_ref = aux_panels(panel, mask, 24)
+    assert set(aux_ref).issubset(set(aux_chunk)), (
+        f"chunked aux is missing {set(aux_ref) - set(aux_chunk)}")
+    for k in ("vol_ann", "beta", "ret"):
+        assert len(aux_chunk[k]) == len(mask)
+    assert len(aux_chunk["mkt_ret"]) == len(mask)

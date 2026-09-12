@@ -296,7 +296,11 @@ def build_features_chunked(panel: dict[str, pd.DataFrame], mask: pd.DataFrame,
     names: list[str] = []
     ts_out = np.empty(n_rows_total, dtype="datetime64[ns]")
     sym_out = np.empty(n_rows_total, dtype=object)
-    aux_parts: dict[str, list] = {"vol_ann": [], "beta": [], "vol_ref": []}
+    # Keep the same keys aux_panels() produces: downstream code (the factor model,
+    # the baselines) reads aux["ret"] and aux["mkt_ret"], and a narrower dict here
+    # turns into a KeyError two stages later.
+    aux_keys = ("vol_ann", "beta", "vol_ref", "ret", "mkt_ret")
+    aux_parts: dict[str, list] = {k: [] for k in aux_keys}
     filled = 0
 
     for ci, i0 in enumerate(starts):
